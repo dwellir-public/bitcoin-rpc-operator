@@ -1,0 +1,16 @@
+[Unit]
+Description=Bitcoin Monitor
+After=network.target
+Documentation=https://github.com/jvstein/bitcoin-prometheus-exporter
+
+[Service]
+WorkingDirectory=/home/bitcoin/monitor
+EnvironmentFile=-/etc/default/bitcoind-monitor
+ExecStart=python3 /home/bitcoin/monitor/bitcoind-monitor.py
+User=bitcoin
+Group=bitcoin
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,67 @@
+version: "2"
+
+run:
+  timeout: 2m
+  tests: true
+
+linters:
+  # standard includes the 5 linters: errcheck, govet, ineffassign, staticcheck, and unused
+  default: standard
+  enable:
+    - revive
+    - misspell
+  settings:
+    revive:
+      # See https://golangci-lint.run/usage/linters/#revive for more information.
+      max-open-files: 2048
+      severity: error
+      enable-all-rules: true
+      directives:
+        - name: specify-disable-reason
+          severity: error
+      confidence: 0.2
+      rules:
+        - name: add-constant
+          disabled: false
+          exclude: [TEST]
+          arguments:
+            - max-lit-count: "5"
+              allow-strs: '""'
+              allow-ints: "0,1,2,3,4,5,10,16,32,64"
+              allow-floats: "0.0,0.,1.0,1.,2.0,2.,0.50,0.90,0.95,0.99"
+        - name: line-length-limit
+          disabled: false
+          exclude: [""]
+          arguments: [120]
+        - name: cognitive-complexity
+          disabled: true
+          exclude: [""]
+          arguments: [21]
+        - name: cyclomatic
+          disabled: true
+          exclude: [""]
+          arguments: [21]
+        - name: function-length
+          disabled: true
+          exclude: [TEST]
+          arguments: [0, 80]
+        - name: comment-spacings
+          disabled: true
+        # https://github.com/mgechev/revive/blob/HEAD/RULES_DESCRIPTIONS.md#package-naming
+        - name: package-naming
+          disabled: false
+          arguments:
+            - skip-default-bad-name-check: true
+        # https://github.com/mgechev/revive/blob/HEAD/RULES_DESCRIPTIONS.md#unhandled-error
+        - name: unhandled-error
+          disabled: false
+          exclude: [""]
+          arguments:
+            - ^(bytes\.Buffer|strings\.Builder)\.Write(Byte|Rune|String)?$
+            - "^fmt.Fprintf"
+    misspell:
+      locale: US
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

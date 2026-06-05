@@ -1,0 +1,72 @@
+name: Charm CI
+
+# Python/tox lane for the charm itself, separate from the Go rpc-proxy lane.
+# Scoped to exclude proxy-only changes so they don't trigger it.
+on:
+  pull_request:
+    paths-ignore:
+      - 'bitcoin-rpc-proxy/**'
+      - '.github/workflows/rpc-proxy-*.yml'
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'bitcoin-rpc-proxy/**'
+      - '.github/workflows/rpc-proxy-*.yml'
+
+jobs:
+  lint:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install tox
+      - run: tox run -e lint
+
+  static:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install tox
+      - run: tox run -e static
+
+  unit-tests:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install tox
+      - run: tox run -e unit
+
+  summary:
+    name: CI Summary
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: [lint, static, unit-tests]
+    if: always() # Always run, even if earlier jobs fail
+    steps:
+      - name: Write CI summary
+        run: |
+          {
+            echo "## Charm CI Summary"
+            echo ""
+            echo "- **Lint:**   ${{ needs.lint.result }}"
+            echo "- **Static:** ${{ needs.static.result }}"
+            echo "- **Unit:**   ${{ needs.unit-tests.result }}"
+            echo ""
+            echo "### Commit"
+            echo "[${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
+            echo ""
+            echo "Triggered by: @${{ github.actor }}"
+            echo "Event: \`${{ github.event_name }}\`"
+            echo ""
+            echo "[View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"

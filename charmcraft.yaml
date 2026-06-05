@@ -1,0 +1,120 @@
+# This file configures Charmcraft.
+# See https://juju.is/docs/sdk/charmcraft-config for guidance.
+
+name: bitcoin
+
+type: charm
+
+title: Bitcoin Blockchain Client Operator
+
+summary: Bitcoin Core full node with a filtering RPC proxy and Prometheus metrics.
+
+description: |
+  This charm installs and operates a Bitcoin Core full node as a systemd service
+  on an Ubuntu machine.
+
+  It manages the node's installation, configuration and lifecycle. All external
+  JSON-RPC traffic is served through a bundled filtering proxy (bitcoind itself
+  stays loopback-only), and node, proxy and machine metrics are exposed for
+  Prometheus scraping.
+
+links:
+  website: https://dwellir.com
+  source: https://github.com/dwellir-public/bitcoin-operator
+  issues: https://github.com/dwellir-public/bitcoin-operator/issues
+
+bases:
+  - build-on:
+    - name: ubuntu
+      channel: "24.04"
+    run-on:
+    - name: ubuntu
+      channel: "24.04"
+
+provides:
+  node-prometheus:
+    interface: prometheus-manual
+  monitor-prometheus:
+    interface: prometheus-manual
+  rpc-proxy-prometheus:
+    interface: prometheus-manual
+
+config:
+  options:
+    rpc-password:
+      type: string
+      description: |
+        The password to use for RPC authentication.
+      default: ""
+    rpc-user:
+      type: string
+      description: |
+        The username to use for RPC authentication.
+      default: ""
+    service-args:
+      type: string
+      description: |
+        Arguments to pass to the Bitcoin client run.
+        See all available options by running --help on the client.
+      default: ""
+    version:
+      type: string
+      description: |
+        The version of the Bitcoin client to install.
+      default: ""
+    rpc-proxy-filter:
+      type: boolean
+      description: |
+        Enforce the proxy's default-deny method allowlist (maps to --filter /
+        PROXY_FILTER). The bitcoin-rpc-proxy always fronts bitcoind's JSON-RPC and
+        bitcoind's RPC is always pinned to loopback; this only controls whether the
+        allowlist is applied. Set to false to forward EVERY method (a "fully open"
+        node): this exposes dangerous methods such as 'stop' and, unless
+        disable-wallet is true, wallet methods. Leave true unless you intentionally
+        want an unfiltered node.
+      default: true
+    rpc-proxy-version:
+      type: string
+      description: |
+        The version of the bitcoin-rpc-proxy binary to install. The proxy is the
+        node's only RPC front door (bitcoind is loopback-only), so this must resolve
+        to a published release asset; if the binary is missing the unit blocks.
+      default: "0.1.0"
+    rpc-proxy-listen:
+      type: string
+      description: |
+        Address:port the proxy serves JSON-RPC on (maps to PROXY_LISTEN).
+      default: "0.0.0.0:8331"
+    rpc-proxy-extend-allowlist:
+      type: string
+      description: |
+        Comma-separated JSON-RPC methods to add to the proxy's SAFE baseline
+        allowlist (maps to --extend-allowlist / PROXY_EXTEND_ALLOWLIST).
+      default: ""
+    disable-wallet:
+      type: boolean
+      description: |
+        Inject -disablewallet into bitcoind's args (stripping conflicting wallet
+        flags from service-args).
+      default: true
+
+actions:
+  get-node-help:
+    description: |
+      Gets the output from the --help command of the Bitcoin client.
+  get-node-info:
+    description: |
+      Gets system information about the node for debugging purposes,
+      including bitcoind and rpc-proxy status.
+  print-readme:
+    description: |
+      Prints this charm's README, with usage and configuration details, to the action output.
+  restart-node:
+    description: |
+      This action restarts the Bitcoin client service and the rpc-proxy.
+  start-node:
+    description: |
+      This action starts the Bitcoin client service, the monitor and the rpc-proxy.
+  stop-node:
+    description: |
+      This action stops the Bitcoin client service, the monitor and the rpc-proxy.

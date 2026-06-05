@@ -1,0 +1,16 @@
+[Unit]
+Description=Bitcoin RPC Proxy
+Documentation=https://github.com/dwellir-public/bitcoin-operator
+After=network.target bitcoind.service
+Wants=bitcoind.service
+
+[Service]
+EnvironmentFile=-/etc/default/bitcoin-rpc-proxy
+ExecStart=/home/bitcoin/bitcoin-rpc-proxy
+User=bitcoin
+Group=bitcoin
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

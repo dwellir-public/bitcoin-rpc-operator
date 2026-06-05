@@ -1,0 +1,86 @@
+name: RPC Proxy CI
+
+# Go test+lint lane for bitcoin-rpc-proxy/, separate from the Python/tox charm lanes.
+# Scoped to changes under the proxy subdir so charm-only changes don't trigger it.
+on:
+  pull_request:
+    paths:
+      - 'bitcoin-rpc-proxy/**'
+      - '.github/workflows/rpc-proxy-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'bitcoin-rpc-proxy/**'
+      - '.github/workflows/rpc-proxy-ci.yml'
+
+defaults:
+  run:
+    working-directory: bitcoin-rpc-proxy
+
+env:
+  GOLANGCI_LINT_VERSION: v2.12.2
+
+jobs:
+  golangci-lint:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bitcoin-rpc-proxy/go.mod
+          cache-dependency-path: bitcoin-rpc-proxy/go.sum
+      - name: lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: bitcoin-rpc-proxy
+          args: -v
+
+  unit-tests:
+    name: Unit tests (race)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bitcoin-rpc-proxy/go.mod
+          cache-dependency-path: bitcoin-rpc-proxy/go.sum
+      - run: go mod download
+      - run: go test -mod=readonly ./... -count=1 -shuffle=on -race -timeout=5m
+
+  unit-tests-flaky:
+    name: Unit tests (flaky)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bitcoin-rpc-proxy/go.mod
+          cache-dependency-path: bitcoin-rpc-proxy/go.sum
+      - run: go mod download
+      - run: go test -mod=readonly ./... -count=16 -shuffle=on -timeout=5m
+
+  summary:
+    name: CI Summary
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: [golangci-lint, unit-tests, unit-tests-flaky]
+    if: always() # Always run, even if earlier jobs fail
+    steps:
+      - name: Write CI summary
+        working-directory: ${{ github.workspace }}
+        run: |
+          {
+            echo "## RPC Proxy CI Summary"
+            echo ""
+            echo "- **Lint:**          ${{ needs.golangci-lint.result }}"
+            echo "- **Unit (race):**   ${{ needs.unit-tests.result }}"
+            echo "- **Unit (flaky):**  ${{ needs.unit-tests-flaky.result }}"
+            echo ""
+            echo "### Commit"
+            echo "[${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
+            echo ""
+            echo "Triggered by: @${{ github.actor }}"
+            echo "Event: \`${{ github.event_name }}\`"
+            echo ""
+            echo "[View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"

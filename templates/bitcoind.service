@@ -1,0 +1,15 @@
+[Unit]
+Description=Bitcoin node
+After=network.target
+Documentation=https://github.com/bitcoin/bitcoin
+
+[Service]
+EnvironmentFile=-/etc/default/bitcoind
+ExecStart=/home/bitcoin/bitcoind $BITCOIND_CLI_ARGS
+User=bitcoin
+Group=bitcoin
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

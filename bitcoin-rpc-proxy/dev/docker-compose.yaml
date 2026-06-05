@@ -1,0 +1,13 @@
+services:
+  # Stand-in for bitcoind's JSON-RPC. Container :8332 -> host :18332. The proxy
+  # runs on the host (see run.sh) pointed at http://127.0.0.1:18332.
+  mock-bitcoind:
+    build:
+      context: ..
+      dockerfile: dev/mock-bitcoind/Dockerfile
+    ports:
+      - "18332:8332"
+    environment:
+      # Set to "user:pass" to make the mock require HTTP Basic auth (401 otherwise),
+      # exercising the proxy's Authorization pass-through. Unset means no auth.
+      MOCK_RPC_AUTH: "${MOCK_RPC_AUTH:-}"
