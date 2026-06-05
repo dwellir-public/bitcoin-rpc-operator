@@ -5,7 +5,7 @@ A small Go HTTP service that sits in front of Bitcoin Core's JSON-RPC, applies a
 survivors to bitcoind on localhost. It is the control point external consumers
 connect to; bitcoind's own RPC is pinned to loopback.
 
-This service is deployed by the Bitcoin charm in this repository (see the charm
+This service is deployed by the `bitcoin-rpc` charm in this repository (see the charm
 [README](../README.md#rpc-proxy) for the operator-facing view). The wire-protocol
 contract it is built against is [`docs/bitcoind-api.md`](../docs/bitcoind-api.md);
 the method risk classification behind the baseline allowlist is
