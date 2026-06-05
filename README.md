@@ -1,6 +1,6 @@
-# Bitcoin Operator Charm
+# Bitcoin RPC Operator
 
-The Bitcoin node operator facilitates running a Bitcoin node using the [Juju framework](https://juju.is/).
+The `bitcoin-rpc` operator runs a Bitcoin Core full node with a filtering RPC proxy, using the [Juju framework](https://juju.is/).
 
 This repository is maintained by Dwellir - a blockchain and web3 infrastructure provider. For more information, see [Dwellir](https://dwellir.com/).
 
@@ -16,7 +16,7 @@ For more information on the client itself, go to [Bitcoin GitHub repository], or
 
 ### Deploy
 
-To deploy the Bitcoin blockchain operator charm, using example values meant to open the node up for RPC access:
+To deploy the `bitcoin-rpc` charm, using example values meant to open the node up for RPC access:
 
 ```bash
 cd /path/to/bitcoin/charm
@@ -166,7 +166,7 @@ This all-or-nothing model (always-on proxy, filtering as the only switch) is int
 
 ### Monitoring
 
-The Bitcoin blockchain operator charm provides Prometheus metrics interfaces. These can be scraped by Prometheus or other monitoring tools, the recommendation is to use the `prometheus2` charm for this. See the [deployment](#deploy) section for an example of how to deploy the Bitcoin blockchain operator charm with Prometheus metrics enabled.
+The `bitcoin-rpc` charm provides Prometheus metrics interfaces. These can be scraped by Prometheus or other monitoring tools, the recommendation is to use the `prometheus2` charm for this. See the [deployment](#deploy) section for an example of how to deploy the charm with Prometheus metrics enabled.
 
 The blockchain metrics are built by the [bitcoind-monitor.py](./templates/bitcoind-monitor.py) script from the [Bitcoin Prometheus exporter] repository, slightly modified. The script is run as a service on the unit and exposes the metrics on the unit's IP address and a specific port (set in [charm.py](./src/charm.py)).
 
