@@ -1,16 +1,16 @@
 # This file configures Charmcraft.
 # See https://juju.is/docs/sdk/charmcraft-config for guidance.
 
-name: bitcoin
+name: bitcoin-rpc
 
 type: charm
 
-title: Bitcoin Blockchain Client Operator
+title: Bitcoin Core Blockchain Node Operator
 
-summary: Bitcoin Core full node with a filtering RPC proxy and Prometheus metrics.
+summary: Bitcoin Core node with a filtering RPC proxy and Prometheus metrics.
 
 description: |
-  This charm installs and operates a Bitcoin Core full node as a systemd service
+  This charm installs and operates a Bitcoin Core node as a systemd service
   on an Ubuntu machine.
 
   It manages the node's installation, configuration and lifecycle. All external

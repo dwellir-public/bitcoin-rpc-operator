@@ -5,7 +5,7 @@
 | Document date | 2026-06-03 |
 | Repo commit | `9724fd1` (`9724fd144a36d4d2c898fc803099b8774ad3e016`) |
 | Bitcoin Core version anchor | **31.0** (released 2026-04-19) |
-| Charm | `bitcoin-operator` (Juju machine charm) |
+| Charm | `bitcoin-rpc` (Juju machine charm) |
 
 > Anchored to Bitcoin Core 31.0, the latest stable at the time of writing. The charm
 > installs whatever `version` config the operator sets (the README example pins `31.0`).

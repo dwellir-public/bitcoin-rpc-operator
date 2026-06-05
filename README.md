@@ -23,15 +23,15 @@ cd /path/to/bitcoin/charm
 charmcraft pack
 
 # Deploy archive node
-juju deploy ./bitcoin_ubuntu-24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -txindex=1 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
+juju deploy ./bitcoin-rpc_ubuntu-24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -txindex=1 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
 # Deploy pruned node with ~10GB of data
-juju deploy ./bitcoin_ubuntu-24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -prune=10000 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
+juju deploy ./bitcoin-rpc_ubuntu-24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -prune=10000 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
 
 # metrics
 juju deploy prometheus2 prometheus
-juju integrate bitcoin:node-prometheus prometheus:manual-jobs
-juju integrate bitcoin:monitor-prometheus prometheus:manual-jobs
-juju integrate bitcoin:rpc-proxy-prometheus prometheus:manual-jobs
+juju integrate bitcoin-rpc:node-prometheus prometheus:manual-jobs
+juju integrate bitcoin-rpc:monitor-prometheus prometheus:manual-jobs
+juju integrate bitcoin-rpc:rpc-proxy-prometheus prometheus:manual-jobs
 ```
 
 NOTE: pick your own RPC credentials; a strong password can be generated with e.g. `openssl rand -hex 16`. See [User and password](#user-and-password) for how the credentials are used.
@@ -56,10 +56,10 @@ Examples:
 
 ```bash
 # Pruned node keeping roughly 50 GB of recent blocks
-juju config bitcoin service-args='-chain=main -server=1 -prune=50000 ...'
+juju config bitcoin-rpc service-args='-chain=main -server=1 -prune=50000 ...'
 
 # Manual pruning
-juju config bitcoin service-args='-chain=main -server=1 -prune=1 ...'
+juju config bitcoin-rpc service-args='-chain=main -server=1 -prune=1 ...'
 ```
 
 Caveats:
@@ -77,7 +77,7 @@ A fresh node spends hours to days on initial block download (IBD). Two ways to s
 ```bash
 # on the unit, after header sync; the txoutset RPCs are not in the proxy's
 # allowlist, so use bitcoin-cli against the loopback RPC
-juju ssh bitcoin/0
+juju ssh bitcoin-rpc/0
 bitcoin-cli setnetworkactive false
 bitcoin-cli -rpcclienttimeout=0 loadtxoutset /path/to/utxo-935000.dat
 bitcoin-cli setnetworkactive true
@@ -97,12 +97,12 @@ For the most effective interaction with the charm, use the Juju CLI. Some exampl
 ```bash
 juju status
 juju debug-log
-juju run bitcoin/0 get-node-info
-juju run bitcoin/0 get-node-help
-juju run bitcoin/0 print-readme
-juju run bitcoin/0 restart-node
-juju run bitcoin/0 start-node
-juju run bitcoin/0 stop-node
+juju run bitcoin-rpc/0 get-node-info
+juju run bitcoin-rpc/0 get-node-help
+juju run bitcoin-rpc/0 print-readme
+juju run bitcoin-rpc/0 restart-node
+juju run bitcoin-rpc/0 start-node
+juju run bitcoin-rpc/0 stop-node
 juju ssh 0 -- sudo systemctl status bitcoind
 juju ssh 0 -- sudo systemctl status bitcoind-monitor
 ```
@@ -110,7 +110,7 @@ juju ssh 0 -- sudo systemctl status bitcoind-monitor
 Upgrading the Bitcoin client is as easy as setting the `version` config to any released version:
 
 ```bash
-juju config bitcoin version=31.0
+juju config bitcoin-rpc version=31.0
 ```
 
 #### On the unit
