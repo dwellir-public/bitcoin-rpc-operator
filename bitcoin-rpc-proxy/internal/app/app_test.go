@@ -52,7 +52,11 @@ func TestAppEndToEnd(t *testing.T) {
 
 	// Health probes are also served on the main RPC listener.
 	assert.Equal(t, http.StatusOK, getStatus(t, mainURL+"/healthz"))
-	assert.Equal(t, http.StatusOK, getStatus(t, mainURL+"/health"))
+	// /health turns 200 only after the poller's first upstream probe completes,
+	// which races server readiness; poll until it lands.
+	require.Eventually(t, func() bool {
+		return getStatus(t, mainURL+"/health") == http.StatusOK
+	}, 3*time.Second, 10*time.Millisecond)
 
 	denied := postStatus(t, mainURL+"/", `{"method":"stop","id":1}`)
 	assert.Equal(t, http.StatusForbidden, denied)
