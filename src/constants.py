@@ -59,7 +59,7 @@ RPC_PROXY_ADMIN_PORT = 8360
 # linux-amd64. VERSION is substituted at install time (the rpc-proxy-version config),
 # mirroring DL_URL.
 RPC_PROXY_DL_URL = (
-    "https://github.com/dwellir-public/bitcoin-operator/releases/download/"
+    "https://github.com/dwellir-public/bitcoin-rpc-operator/releases/download/"
     "rpc-proxy-vVERSION/bitcoin-rpc-proxy-VERSION-linux-amd64"
 )
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Bitcoin RPC Proxy
-Documentation=https://github.com/dwellir-public/bitcoin-operator
+Documentation=https://github.com/dwellir-public/bitcoin-rpc-operator
 After=network.target bitcoind.service
 Wants=bitcoind.service
 

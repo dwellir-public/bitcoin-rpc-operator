@@ -20,8 +20,8 @@ description: |
 
 links:
   website: https://dwellir.com
-  source: https://github.com/dwellir-public/bitcoin-operator
-  issues: https://github.com/dwellir-public/bitcoin-operator/issues
+  source: https://github.com/dwellir-public/bitcoin-rpc-operator
+  issues: https://github.com/dwellir-public/bitcoin-rpc-operator/issues
 
 bases:
   - build-on:
