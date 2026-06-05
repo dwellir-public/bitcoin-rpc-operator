@@ -19,7 +19,7 @@ For more information on the client itself, go to [Bitcoin GitHub repository], or
 To deploy the `bitcoin-rpc` charm, using example values meant to open the node up for RPC access:
 
 ```bash
-cd /path/to/bitcoin/charm
+cd /path/to/bitcoin-rpc-operator
 charmcraft pack
 
 # Deploy archive node
@@ -103,8 +103,9 @@ juju run bitcoin-rpc/0 print-readme
 juju run bitcoin-rpc/0 restart-node
 juju run bitcoin-rpc/0 start-node
 juju run bitcoin-rpc/0 stop-node
-juju ssh 0 -- sudo systemctl status bitcoind
-juju ssh 0 -- sudo systemctl status bitcoind-monitor
+juju ssh bitcoin-rpc/0 -- sudo systemctl status bitcoind
+juju ssh bitcoin-rpc/0 -- sudo systemctl status bitcoind-monitor
+juju ssh bitcoin-rpc/0 -- sudo systemctl status bitcoin-rpc-proxy
 ```
 
 Upgrading the Bitcoin client is as easy as setting the `version` config to any released version:
@@ -122,10 +123,11 @@ juju config bitcoin-rpc version=31.0
   - Note: this is not in use per default, but can be used to configure the Bitcoin client. Configurations from it **WILL** override any service arguments if used.
 - Service name: `bitcoind`
 - Monitor service name: `bitcoind-monitor`
+- RPC proxy service name: `bitcoin-rpc-proxy`
 
 All Bitcoin client versions are available from the Bitcoin Core website: [Bitcoin client index](https://bitcoincore.org/bin/)
 
-The Bitcoin RPC API reference: [RPC API reference](https://developer.bitcoin.org/reference/rpc/)
+The Bitcoin RPC API reference: [RPC API reference](https://bitcoincore.org/en/doc/)
 
 ### Node RPC
 
@@ -159,6 +161,8 @@ By default the proxy enforces a default-deny method allowlist (the SAFE baseline
 
 - `rpc-proxy-filter=true` (default): only allowlisted methods reach `bitcoind`.
 - `rpc-proxy-filter=false`: every method is forwarded ("fully open" node). This exposes dangerous methods such as `stop` and, unless `disable-wallet` is true, wallet methods. Even then `bitcoind` itself stays loopback-only behind the proxy.
+
+The method classification behind the allowlist is documented in [docs/bitcoin-rpc-methods.md](./docs/bitcoin-rpc-methods.md), and the `bitcoind` JSON-RPC behavior the proxy builds against in [docs/bitcoind-api.md](./docs/bitcoind-api.md).
 
 The proxy binary is installed by `rpc-proxy-version` (a published release asset). If it is missing, the unit goes `BlockedStatus` and the node is left **fail-closed**: `bitcoind` is loopback-only and unreachable from the network, rather than exposed.
 
