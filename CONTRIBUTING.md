@@ -1,6 +1,6 @@
 # Contributing
 
-To make contributions to this charm, you'll need a working [development setup](https://juju.is/docs/sdk/dev-setup).
+To make contributions to this charm, you'll need a working [development setup](https://documentation.ubuntu.com/juju/latest/howto/manage-your-juju-deployment/set-up-your-juju-deployment-local-testing-and-development/).
 
 The repo also contains the [bitcoin-rpc-proxy](./bitcoin-rpc-proxy/) Go service; working on that part requires a Go toolchain (version per its [go.mod](./bitcoin-rpc-proxy/go.mod)). See its [README](./bitcoin-rpc-proxy/README.md) and `make` targets (`build`, `fmt`, `lint`, `test`) for the development workflow.
 

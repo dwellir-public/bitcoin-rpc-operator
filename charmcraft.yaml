@@ -1,5 +1,5 @@
 # This file configures Charmcraft.
-# See https://juju.is/docs/sdk/charmcraft-config for guidance.
+# See https://documentation.ubuntu.com/charmcraft/en/stable/reference/files/charmcraft-yaml-file/ for guidance.
 
 name: bitcoin-rpc
 
