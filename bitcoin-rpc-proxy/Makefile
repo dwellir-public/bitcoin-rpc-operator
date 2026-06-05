@@ -1,6 +1,6 @@
 BUILD_TIME_UTC := $(shell date -u +'%Y-%m-%d_%H:%M:%S')
 COMMIT  := $(shell git rev-parse --short HEAD)
-VERSION := $(shell cat VERSION)
+VERSION := $(shell cat ../VERSION)
 VERSION_LABEL ?= $(VERSION)
 
 .PHONY: build fmt lint run test explain

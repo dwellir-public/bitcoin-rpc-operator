@@ -27,6 +27,7 @@ charmcraft pack    # build the .charm artifact (build-on Ubuntu 24.04)
 - Prefer minimal, tested changes over broad charm redesign.
 - Keep chain-specific runtime behavior in config and `service-args`. Only add charm logic when a real deployment blocker requires it.
 - Before a release build (`charmcraft pack`), run focused unit tests for the two risk areas: binary download/extraction (`utils.install_bitcoin`) and service-arg handling (`utils.update_service_args`).
+- Releases are unified: one `v<version>` tag (root `VERSION` file) covers charm + proxy. When preparing a release, update `CHANGELOG.md` with a `## [<version>]` section containing both `### Charm` and `### Proxy`; a vertical without changes gets the literal line `No changes this release.` (the release workflow enforces this).
 - `charmcraft pack` builds on Ubuntu 24.04. From a non-Ubuntu host, run it inside an Ubuntu 24.04 container or VM.
 
 ## Conventions

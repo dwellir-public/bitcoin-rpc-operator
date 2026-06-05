@@ -76,9 +76,10 @@ config:
     rpc-proxy-version:
       type: string
       description: |
-        The version of the bitcoin-rpc-proxy binary to install. The proxy is the
-        node's only RPC front door (bitcoind is loopback-only), so this must resolve
-        to a published release asset; if the binary is missing the unit blocks.
+        The version of the bitcoin-rpc-proxy binary to install, matching a
+        v<version> release of this repository. The proxy is the node's only RPC
+        front door (bitcoind is loopback-only), so this must resolve to a published
+        release asset; if the binary is missing the unit blocks.
       default: "0.1.0"
     rpc-proxy-listen:
       type: string

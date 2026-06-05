@@ -190,11 +190,12 @@ Deliberately out of scope (v1):
 ## Build, test, release
 
 - Go 1.26.3, golangci-lint 2.12.2. `Makefile` targets: `build`, `run`, `test`,
-  `lint`, `fmt`. Build injects version metadata via `-ldflags` from `VERSION` + git.
+  `lint`, `fmt`. Build injects version metadata via `-ldflags` from the repo-root
+  `VERSION` file + git.
 - Cross-compile target is `GOOS=linux GOARCH=amd64`, static (`CGO_ENABLED=0`); the
   charm host is Ubuntu 24.04 amd64.
-- Releases are published as GitHub Release assets on this repo by
-  `.github/workflows/rpc-proxy-release.yml`, tagged `rpc-proxy-v<version>` with the
+- The proxy is released together with the charm under a single repo version by
+  `.github/workflows/release.yml`: GitHub Releases tagged `v<version>` with the
   asset `bitcoin-rpc-proxy-<version>-linux-amd64`. The charm's `rpc-proxy-version`
   config selects which asset to install (see `RPC_PROXY_DL_URL` in
   `src/constants.py`).

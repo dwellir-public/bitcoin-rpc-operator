@@ -39,7 +39,7 @@ NOTE: pick your own RPC credentials; a strong password can be generated with e.g
 NOTE: do not pass `-rpcbind`, `-rpcallowip` or `-rpcport` in `service-args` — the charm strips them and pins `bitcoind`'s RPC to loopback on a fixed port, since the [RPC proxy](#rpc-proxy) is the node's only RPC front door. External access is configured via `rpc-proxy-listen` instead.
 
 - The `version` config is **required** and has no default. Without it the Bitcoin client is not installed and the unit stays blocked. Pick any released version from the [Bitcoin client index](https://bitcoincore.org/bin/), e.g. `--config version=31.0` as above.
-- The `rpc-proxy-version` config defaults to a published `bitcoin-rpc-proxy` release. The matching `rpc-proxy-v<version>` release asset must exist on this repository's GitHub releases page, or the unit goes into `BlockedStatus` with `bitcoind` left loopback-only (see [RPC proxy](#rpc-proxy)).
+- The `rpc-proxy-version` config defaults to a published release of this repository. The matching `v<version>` release with a `bitcoin-rpc-proxy` asset must exist on this repository's GitHub releases page, or the unit goes into `BlockedStatus` with `bitcoind` left loopback-only (see [RPC proxy](#rpc-proxy)).
 - Setting `-txindex=1` is optional, but recommended for full transaction indexing. This equals "archive mode" for other blockchains. If this is not set from deploy, one might need to run a reindex operation to make sure all transactions are indexed.
 
 #### Pruning Level

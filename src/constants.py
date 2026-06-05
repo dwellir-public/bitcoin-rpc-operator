@@ -54,13 +54,13 @@ RPC_PROXY_BINARY_PATH = HOME_DIR / RPC_PROXY_BINARY_NAME
 RPC_PROXY_PORT = 8331
 RPC_PROXY_ADMIN_PORT = 8360
 
-# Release asset published by .github/workflows/rpc-proxy-release.yml: a GitHub
-# Release on this repo, tag rpc-proxy-v<version>, asset bitcoin-rpc-proxy-<version>-
-# linux-amd64. VERSION is substituted at install time (the rpc-proxy-version config),
+# Release asset published by .github/workflows/release.yml: a GitHub Release on
+# this repo, tag v<version>, asset bitcoin-rpc-proxy-<version>-linux-amd64.
+# VERSION is substituted at install time (the rpc-proxy-version config),
 # mirroring DL_URL.
 RPC_PROXY_DL_URL = (
     "https://github.com/dwellir-public/bitcoin-rpc-operator/releases/download/"
-    "rpc-proxy-vVERSION/bitcoin-rpc-proxy-VERSION-linux-amd64"
+    "vVERSION/bitcoin-rpc-proxy-VERSION-linux-amd64"
 )
 
 # Written to /etc/default/bitcoin-rpc-proxy; the proxy reads these PROXY_* vars
