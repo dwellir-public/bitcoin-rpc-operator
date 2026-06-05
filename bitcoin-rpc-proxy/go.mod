@@ -1,4 +1,4 @@
-module github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy
+module github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy
 
 go 1.26.3
 

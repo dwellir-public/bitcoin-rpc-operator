@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/policy"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/server"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/upstream"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/policy"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/server"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/upstream"
 )
 
 const defaultMaxBody = 1 << 20

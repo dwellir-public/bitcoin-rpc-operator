@@ -11,10 +11,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/handler"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/policy"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/server"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/upstream"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/handler"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/policy"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/server"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/upstream"
 )
 
 const (

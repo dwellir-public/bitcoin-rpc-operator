@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/upstream"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/upstream"
 )
 
 const (

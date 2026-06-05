@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/app"
-	"github.com/dwellir-public/bitcoin-operator/bitcoin-rpc-proxy/internal/common"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/app"
+	"github.com/dwellir-public/bitcoin-rpc-operator/bitcoin-rpc-proxy/internal/common"
 )
 
 // Build information, injected via -ldflags at build time.
