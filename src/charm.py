@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Dwellir
+# Copyright 2024-2026 Dwellir
 # See LICENSE file for licensing details.
 #
 # Learn more at: https://juju.is/docs/sdk

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2024 Jakob Ersson
+# Copyright 2024-2026 Dwellir
 # See LICENSE file for licensing details.
 
 import logging

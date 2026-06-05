@@ -1,4 +1,4 @@
-# Copyright 2024 Jakob Ersson
+# Copyright 2024-2026 Dwellir
 # See LICENSE file for licensing details.
 #
 # Learn more about testing at: https://juju.is/docs/sdk/testing
