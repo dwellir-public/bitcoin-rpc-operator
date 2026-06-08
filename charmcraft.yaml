@@ -30,6 +30,16 @@ parts:
   bitcoin-rpc-charm:
     source: .
     plugin: charm
+    build-packages:
+      - git
+    # Stamp the charm's release tag + commit into a `charm_version` file that
+    # get-node-info reads at runtime (utils.get_charm_version). Falls back to
+    # the VERSION tag if .git isn't present in the build sandbox.
+    override-build: |
+      craftctl default
+      git -C "$CRAFT_PART_SRC" describe --tags --always --dirty 2>/dev/null \
+        > "$CRAFT_PART_INSTALL/charm_version" \
+        || cat "$CRAFT_PART_SRC/VERSION" > "$CRAFT_PART_INSTALL/charm_version"
 
 provides:
   node-prometheus:

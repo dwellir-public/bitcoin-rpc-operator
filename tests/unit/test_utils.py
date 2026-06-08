@@ -105,3 +105,23 @@ def test_install_bitcoin_failed_download_skips_install():
 
     run.assert_not_called()
     chown.assert_not_called()
+
+
+def test_get_charm_version_prefers_stamped_file(tmp_path, monkeypatch):
+    # The build-time charm_version stamp (tag + commit) wins over the VERSION tag.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "charm_version").write_text("v0.1.0-6-gd0d4771\n")
+    (tmp_path / "VERSION").write_text("0.1.0\n")
+    assert utils.get_charm_version() == "v0.1.0-6-gd0d4771"
+
+
+def test_get_charm_version_falls_back_to_version_file(tmp_path, monkeypatch):
+    # Without the stamp (e.g. git absent in the build sandbox), fall back to VERSION.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "VERSION").write_text("0.1.0\n")
+    assert utils.get_charm_version() == "0.1.0"
+
+
+def test_get_charm_version_unknown_when_absent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert utils.get_charm_version() == "unknown"

@@ -243,6 +243,8 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_get_node_info_action(self, event: ops.ActionEvent) -> None:
         """Provide information about the node to the action's results."""
+        # Charm
+        event.set_results(results={"charm-version": utils.get_charm_version()})
         # Disk usage
         disk_usage = utils.get_disk_usage(c.HOME_DIR)
         event.set_results(results={"disk-usage": disk_usage})

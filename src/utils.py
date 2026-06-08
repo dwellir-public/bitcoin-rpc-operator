@@ -388,12 +388,27 @@ def get_version() -> str:
     return match.groups()[0]
 
 
+def get_charm_version() -> str:
+    """Return the charm's release version and commit, e.g. "v0.1.0-6-gd0d4771".
+
+    `charm_version` is stamped at pack time by charmcraft's override-build (git
+    describe). It falls back to the bundled VERSION file (tag only, no commit)
+    when git was unavailable in the build sandbox, then to "unknown".
+    """
+    # Both filenames live at the charm root; hook CWD is the charm dir (see get_readme).
+    for name in ("charm_version", "VERSION"):
+        path = Path(name)
+        if path.exists():
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    return "unknown"
+
+
 def get_rpc_proxy_version() -> str:
     """Return the installed bitcoin-rpc-proxy version, or an empty string if it can't be determined."""
     try:
-        output = sp.run(
-            [c.RPC_PROXY_BINARY_PATH, "--version"], check=True, capture_output=True, text=True
-        ).stdout
+        output = sp.run([c.RPC_PROXY_BINARY_PATH, "--version"], check=True, capture_output=True, text=True).stdout
     except (FileNotFoundError, PermissionError, sp.CalledProcessError) as e:
         logger.error("Failed to get version from %s. Exception: %s", c.RPC_PROXY_BINARY_PATH, e)
         return ""
