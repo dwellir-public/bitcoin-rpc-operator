@@ -74,19 +74,33 @@ A fresh node spends hours to days on initial block download (IBD). Two ways to s
 
 **AssumeUTXO (recommended).** Bitcoin Core's native fast-bootstrap: load a ~12 GB serialized UTXO-set snapshot via the `loadtxoutset` RPC and the node is usable at chain tip within minutes, while full history downloads and validates in the background. The snapshot hash is hardcoded in Bitcoin Core's source per release, so a tampered snapshot is rejected regardless of where it was downloaded from. Mainnet snapshot heights track releases: 840,000 (v28), 880,000 (v29), 910,000 (v30), 935,000 (v31). Snapshots are available from [bitcoin-snapshots.jaonoctus.dev](https://bitcoin-snapshots.jaonoctus.dev/) (torrent + direct), or dump your own from a synced node with `dumptxoutset`.
 
+Run the load against the **live, running node** — do not stop the service or delete the chainstate first. `loadtxoutset` adds a second (snapshot) chainstate alongside the existing background-validation one; deleting the datadir would only throw away IBD progress that the background sync reuses.
+
 ```bash
-# on the unit, after header sync; the txoutset RPCs are not in the proxy's
-# allowlist, so use bitcoin-cli against the loopback RPC. bitcoin-cli is not on
-# PATH, so call it by full path as the bitcoin user (the RPC cookie and datadir
-# are owned by that user).
+# On the unit, after header sync. The txoutset RPCs are not in the proxy's
+# allowlist, so drive bitcoin-cli against bitcoind's loopback RPC. bitcoin-cli is
+# not on PATH; call it by full path as the bitcoin user.
 juju ssh bitcoin-rpc/0
-sudo -u bitcoin /home/bitcoin/bitcoin-cli setnetworkactive false
-sudo -u bitcoin /home/bitcoin/bitcoin-cli -rpcclienttimeout=0 loadtxoutset /path/to/utxo-935000.dat
-sudo -u bitcoin /home/bitcoin/bitcoin-cli setnetworkactive true
-sudo -u bitcoin /home/bitcoin/bitcoin-cli getchainstates   # monitor background validation
+
+# bitcoind runs with -rpcuser/-rpcpassword (from the rpc-user/rpc-password configs),
+# which DISABLES cookie auth, so bitcoin-cli must be handed the same credentials.
+CLI="sudo -u bitcoin /home/bitcoin/bitcoin-cli -rpcuser=<rpc-user> -rpcpassword=<rpc-password>"
+
+$CLI setnetworkactive false   # pause P2P during the load; node stays running
+# Pass an ABSOLUTE path. A relative path is resolved against the datadir
+# (/home/bitcoin/.bitcoin), and the file must be readable by the bitcoin user --
+# it is bitcoind, not your shell, that opens it. If you downloaded the snapshot
+# as another user, move it: sudo install -o bitcoin -g bitcoin -m644 <src> /home/bitcoin/
+$CLI -rpcclienttimeout=0 loadtxoutset /home/bitcoin/utxo-935000.dat
+$CLI setnetworkactive true
+$CLI getchainstates   # monitor background validation
 ```
 
-Caveats: bandwidth cost is unchanged (full history still downloads in the background; only time-to-usable improves); works fine with pruning; `-txindex` is not built until background validation completes.
+Caveats:
+
+- **`loadtxoutset` blocks** for several minutes while it reads the ~12 GB file (hence `-rpcclienttimeout=0`); the node keeps serving throughout. Don't `restart`/`stop` bitcoind mid-load.
+- Bandwidth cost is unchanged: full history still downloads in the background, only time-to-usable improves.
+- Works fine with pruning; `-txindex` is not built until background validation completes.
 
 **Pruned datadir snapshot.** For pruned deployments, [prunednode.today](https://prunednode.today/) publishes a complete `prune=550` datadir tarball, GPG-signed by the Specter team. Stop the node (`stop-node` action), extract the tarball into `/home/bitcoin/.bitcoin` (owned by the `bitcoin` user), then `start-node`; the node only syncs the blocks since the snapshot. Trust model: the imported history is never validated, so you are trusting the snapshot signer — verify the GPG signature, and prefer AssumeUTXO when full validation matters.
 
@@ -129,7 +143,15 @@ juju config bitcoin-rpc version=31.0
 - Monitor service name: `bitcoind-monitor`
 - RPC proxy service name: `bitcoin-rpc-proxy`
 
-Both `bitcoind` and `bitcoin-cli` are extracted from the same release tarball and live in the home directory. They are not on the system `PATH`, so invoke `bitcoin-cli` by its full path as the `bitcoin` user, e.g. `sudo -u bitcoin /home/bitcoin/bitcoin-cli getblockchaininfo`. The client talks to `bitcoind`'s loopback RPC directly, bypassing the proxy's method allowlist, which is what makes admin RPCs like `loadtxoutset` and `pruneblockchain` reachable on the unit.
+Both `bitcoind` and `bitcoin-cli` are extracted from the same release tarball and live in the home directory. They are not on the system `PATH`, so invoke `bitcoin-cli` by its full path as the `bitcoin` user. The client talks to `bitcoind`'s loopback RPC directly, bypassing the proxy's method allowlist, which is what makes admin RPCs like `loadtxoutset` and `pruneblockchain` reachable on the unit.
+
+Because the charm sets `-rpcuser`/`-rpcpassword`, `bitcoind` disables cookie auth, so `bitcoin-cli` must be given the same credentials or it fails with "Could not locate RPC credentials":
+
+```bash
+sudo -u bitcoin /home/bitcoin/bitcoin-cli -rpcuser=<rpc-user> -rpcpassword=<rpc-password> getblockchaininfo
+```
+
+To avoid passing the flags on every call, append `rpcuser=`/`rpcpassword=` (same values) to `/home/bitcoin/.bitcoin/bitcoin.conf` — but note that `bitcoin.conf` overrides `service-args`, and remove the lines later if you don't want them to persist.
 
 All Bitcoin client versions are available from the Bitcoin Core website: [Bitcoin client index](https://bitcoincore.org/bin/)
 
