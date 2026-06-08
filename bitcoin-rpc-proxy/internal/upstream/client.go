@@ -4,6 +4,7 @@ package upstream
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
@@ -44,8 +45,18 @@ type Response struct {
 
 // Client forwards requests to a bitcoind JSON-RPC endpoint over a pooled transport.
 type Client struct {
-	baseURL string
-	client  *http.Client
+	baseURL    string
+	client     *http.Client
+	authHeader string // "Basic ..." injected on Forward when the caller sent none
+}
+
+// basicAuth builds an HTTP Basic Authorization header value, or "" when user is
+// empty (auth disabled).
+func basicAuth(user, password string) string {
+	if user == "" {
+		return ""
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+password))
 }
 
 // NewClient creates an upstream client for baseURL with the given per-request timeout.
@@ -68,9 +79,20 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
+// SetUpstreamAuth configures Basic credentials injected into forwarded requests
+// that arrive without an Authorization header. A caller-supplied Authorization
+// always takes precedence. An empty user disables injection. Call once before
+// serving; it is not safe for concurrent use with Forward.
+func (c *Client) SetUpstreamAuth(user, password string) {
+	c.authHeader = basicAuth(user, password)
+}
+
 // Forward POSTs body to baseURL+path, passing through header (minus hop-by-hop
-// headers) so the caller's Authorization reaches bitcoind. It returns a
-// classified error (ErrUpstreamTimeout / ErrUpstreamUnavailable) on failure.
+// headers) so a caller-supplied Authorization reaches bitcoind. When the caller
+// sent no Authorization and upstream credentials are configured (SetUpstreamAuth),
+// the proxy's own credentials are injected so unauthenticated callers (e.g. via
+// HAProxy) still authenticate to bitcoind. It returns a classified error
+// (ErrUpstreamTimeout / ErrUpstreamUnavailable) on failure.
 func (c *Client) Forward(ctx context.Context, path string, header http.Header, body []byte) (*Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
@@ -78,6 +100,9 @@ func (c *Client) Forward(ctx context.Context, path string, header http.Header, b
 	}
 	copyForwardHeaders(req.Header, header)
 	req.Header.Set("Content-Type", "application/json")
+	if c.authHeader != "" && req.Header.Get("Authorization") == "" {
+		req.Header.Set("Authorization", c.authHeader)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {

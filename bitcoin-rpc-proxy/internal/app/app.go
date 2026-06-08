@@ -36,6 +36,7 @@ type App struct {
 func New(cfg *Config, logger zerolog.Logger, version string) *App {
 	metrics := handler.NewMetrics()
 	client := upstream.NewClient(cfg.UpstreamURL, cfg.UpstreamTimeout)
+	client.SetUpstreamAuth(cfg.UpstreamUser, cfg.UpstreamPassword)
 	allow := policy.NewAllowlist(cfg.ExtendAllowlist)
 	rpcHandler := handler.NewRPC(allow, client, cfg.MaxBodyBytes, cfg.Filter, metrics)
 

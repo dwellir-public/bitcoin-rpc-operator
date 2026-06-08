@@ -21,7 +21,13 @@ vertical with no changes states `No changes this release.`
 
 ### Proxy
 
-- No changes this release.
+- The proxy now authenticates to bitcoind on behalf of callers that send no
+  `Authorization` header, injecting the configured upstream credentials
+  (`PROXY_UPSTREAM_USER`/`PROXY_UPSTREAM_PASSWORD`) on the forward path. This
+  lets an unauthenticated front end (e.g. HAProxy) reach bitcoind with the
+  method allowlist as the sole policy gate. A caller-supplied `Authorization`
+  still takes precedence. The main port (`:8331`) must therefore be
+  network-restricted to the trusted front end.
 
 ## [0.1.0] - 2026-06-05
 

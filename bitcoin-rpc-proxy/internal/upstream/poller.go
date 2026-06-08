@@ -2,7 +2,6 @@ package upstream
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,11 +66,7 @@ func NewPoller(client *Client, interval time.Duration, logger zerolog.Logger) *P
 // SetUpstreamAuth configures Basic credentials sent only on the health probe (not
 // on forwarded client traffic). When user is empty, the probe stays unauthenticated.
 func (p *Poller) SetUpstreamAuth(user, password string) {
-	if user == "" {
-		p.authHeader = ""
-		return
-	}
-	p.authHeader = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+password))
+	p.authHeader = basicAuth(user, password)
 }
 
 // OnPoll sets a callback invoked after each poll with the cached health.

@@ -115,9 +115,16 @@ or the `btc_rpc_proxy_upstream_healthy` metric, not `/healthz`.
 ### Forwarding semantics
 
 When **all** calls in an envelope are allowed, the original body is forwarded
-byte-for-byte (not re-serialized) with the client's `Authorization` header; the
-upstream status, body, and `Content-Type` are returned verbatim. A batch with any
-disallowed call is rejected whole. The deny path never reaches upstream.
+byte-for-byte (not re-serialized); the upstream status, body, and `Content-Type`
+are returned verbatim. A batch with any disallowed call is rejected whole. The
+deny path never reaches upstream.
+
+The forwarded request's `Authorization` is resolved as follows: a client-supplied
+`Authorization` is passed through unchanged; if the client sent none and upstream
+credentials are configured (`PROXY_UPSTREAM_USER`/`PROXY_UPSTREAM_PASSWORD`), the
+proxy injects its own. This lets an unauthenticated front end (e.g. HAProxy)
+reach bitcoind with the method allowlist as the sole policy gate -- so the main
+port (`0.0.0.0:8331`) must be network-restricted to that trusted front end.
 
 Status/error mapping the proxy emits itself (upstream statuses pass through
 unchanged). [`docs/bitcoind-api.md` §8](../docs/bitcoind-api.md) is authoritative

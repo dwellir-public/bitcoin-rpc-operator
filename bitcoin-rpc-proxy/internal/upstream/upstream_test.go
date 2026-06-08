@@ -54,6 +54,51 @@ func TestForwardStripsHopByHop(t *testing.T) {
 	assert.Empty(t, gotConn, "hop-by-hop headers must not be forwarded")
 }
 
+func TestForwardInjectsUpstreamAuthWhenAbsent(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, time.Second)
+	c.SetUpstreamAuth("user", "pass")
+	_, err := c.Forward(context.Background(), "/", nil, []byte(`{}`))
+	require.NoError(t, err)
+	assert.Equal(t, basicAuth("user", "pass"), gotAuth, "proxy must inject upstream auth when caller sent none")
+}
+
+func TestForwardPreservesCallerAuth(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, time.Second)
+	c.SetUpstreamAuth("user", "pass")
+	hdr := http.Header{"Authorization": {"Basic caller"}}
+	_, err := c.Forward(context.Background(), "/", hdr, []byte(`{}`))
+	require.NoError(t, err)
+	assert.Equal(t, "Basic caller", gotAuth, "caller-supplied Authorization must take precedence")
+}
+
+func TestForwardNoInjectionWhenUnconfigured(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, time.Second)
+	_, err := c.Forward(context.Background(), "/", nil, []byte(`{}`))
+	require.NoError(t, err)
+	assert.Empty(t, gotAuth, "no auth must be injected when upstream credentials are unset")
+}
+
 func TestForwardUnavailable(t *testing.T) {
 	// Reserved TEST-NET-1 address that does not accept connections quickly,
 	// using a closed local port instead for determinism.
