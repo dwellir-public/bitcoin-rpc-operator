@@ -218,6 +218,12 @@ class BitcoinCharm(ops.CharmBase):
         # bitcoind and proxy binaries are version-driven (config) and handled in
         # _on_config_changed, so neither is re-downloaded here; upgrade should not
         # change the running versions.
+        #
+        # install_dependencies re-runs the pinned monitor venv install, so a
+        # revision that bumps PIP_PACKAGES (or migrates a unit off a pre-venv
+        # revision) lands the new deps; the monitor is restarted below to pick
+        # them up. The venv is reused in place, not torn down, so the running
+        # monitor keeps serving until the explicit restart.
         utils.install_dependencies()
         utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
         self._install_bitcoind_monitor()

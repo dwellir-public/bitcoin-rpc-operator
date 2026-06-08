@@ -59,6 +59,33 @@ class TestCharm(unittest.TestCase):
         mock_utils.install_rpc_proxy_service.assert_called_once()
 
     @patch("charm.utils")
+    def test_upgrade_reinstalls_pinned_dependencies(self, mock_utils):
+        # Upgrade must re-run the pinned monitor venv install so a revision that
+        # bumps PIP_PACKAGES (or migrates a unit off a pre-venv revision) lands
+        # the new deps, and re-lay the monitor unit so its venv ExecStart applies.
+        mock_utils.service_running.return_value = True
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.install_dependencies.assert_called_once()
+        mock_utils.install_bitcoind_monitor.assert_called_once()
+
+    @patch("charm.utils")
+    def test_upgrade_restarts_running_monitor(self, mock_utils):
+        # A running monitor is restarted so reinstalled deps take effect.
+        mock_utils.service_running.return_value = True
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.restart_monitor.assert_called_once()
+
+    @patch("charm.utils")
+    def test_upgrade_does_not_restart_stopped_monitor(self, mock_utils):
+        # A stopped monitor stays stopped; an upgrade does not start it.
+        mock_utils.service_running.return_value = False
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.restart_monitor.assert_not_called()
+
+    @patch("charm.utils")
     def test_cred_rotation_refreshes_proxy_env(self, mock_utils):
         # Rotating rpc-user/rpc-password must rewrite the proxy's env file and
         # restart it, or it keeps probing upstream with dead credentials.

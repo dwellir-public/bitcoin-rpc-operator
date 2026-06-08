@@ -11,6 +11,18 @@ vertical with no changes states `No changes this release.`
 
 ## [Unreleased]
 
+### Charm
+
+- Fixed install hook failing on Ubuntu 24.04 with PEP 668
+  `externally-managed-environment`: the monitor's pip dependencies
+  (`prometheus_client`, `python-bitcoinlib`, `riprova`) now install into a
+  dedicated, version-pinned venv instead of the system Python, and the
+  `bitcoind-monitor` service runs from that venv.
+
+### Proxy
+
+- No changes this release.
+
 ## [0.1.0] - 2026-06-05
 
 ### Charm

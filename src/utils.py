@@ -66,12 +66,15 @@ def install_dependencies() -> None:
     packages = c.APT_PACKAGES
     command.extend(packages)
     sp.run(command, check=True)
-    # pip
-    logger.info("Installing user dependencies via pip.")
-    command = ["pip", "install"]
-    packages = c.PIP_PACKAGES
-    command.extend(packages)
-    sp.run(command, user=c.USER, group=c.USER, check=True)
+    # pip (into a dedicated venv; the system Python is externally managed on
+    # Ubuntu 24.04, so a bare `pip install` would fail PEP 668).
+    logger.info("Installing monitor dependencies into a venv.")
+    c.MONITOR_DIR.mkdir(parents=True, exist_ok=True)
+    sp.run(["python3", "-m", "venv", str(c.MONITOR_VENV_DIR)], check=True)
+    command = [str(c.MONITOR_VENV_PIP), "install"]
+    command.extend(c.PIP_PACKAGES)
+    sp.run(command, check=True)
+    chown()
 
 
 def install_service_file(source_path: str, service_name: str) -> None:

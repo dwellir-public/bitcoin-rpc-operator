@@ -6,7 +6,7 @@ Documentation=https://github.com/jvstein/bitcoin-prometheus-exporter
 [Service]
 WorkingDirectory=/home/bitcoin/monitor
 EnvironmentFile=-/etc/default/bitcoind-monitor
-ExecStart=python3 /home/bitcoin/monitor/bitcoind-monitor.py
+ExecStart=/home/bitcoin/monitor/venv/bin/python /home/bitcoin/monitor/bitcoind-monitor.py
 User=bitcoin
 Group=bitcoin
 Restart=always

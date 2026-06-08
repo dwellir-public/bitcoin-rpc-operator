@@ -6,7 +6,50 @@ from unittest import mock
 import pytest
 import requests
 
+import constants as c
 import utils
+
+# install_dependencies
+
+
+def test_install_dependencies_installs_apt_then_pinned_venv():
+    with (
+        mock.patch("utils.sp.run") as run,
+        mock.patch("utils.chown") as chown,
+        mock.patch("utils.Path.mkdir") as mkdir,
+    ):
+        utils.install_dependencies()
+
+    cmds = [call.args[0] for call in run.call_args_list]
+    # apt update, apt install, venv creation, then pip install -- in order.
+    assert cmds[0] == ["apt", "update"]
+    assert cmds[1][:3] == ["apt", "install", "-y"]
+    assert "python3-venv" in cmds[1]
+    assert cmds[2] == ["python3", "-m", "venv", str(c.MONITOR_VENV_DIR)]
+
+    pip_cmd = cmds[3]
+    assert pip_cmd[:2] == [str(c.MONITOR_VENV_PIP), "install"]
+    # Dependencies must be installed into the venv pip, version-pinned.
+    assert pip_cmd[2:] == c.PIP_PACKAGES
+    assert all("==" in pkg for pkg in pip_cmd[2:])
+
+    mkdir.assert_called_once()
+    chown.assert_called_once()
+
+
+def test_install_dependencies_does_not_use_system_pip():
+    # PEP 668: a bare `pip install` into the system Python fails on Ubuntu 24.04.
+    with (
+        mock.patch("utils.sp.run") as run,
+        mock.patch("utils.chown"),
+        mock.patch("utils.Path.mkdir"),
+    ):
+        utils.install_dependencies()
+
+    for call in run.call_args_list:
+        cmd = call.args[0]
+        assert cmd[0] != "pip", "must install via the venv pip, not system pip"
+
 
 # install_bitcoin
 

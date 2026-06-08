@@ -25,6 +25,14 @@ MONITOR_DIR = HOME_DIR / "monitor"
 MONITOR_SCRIPT_NAME = "bitcoind-monitor.py"
 MONITOR_SCRIPT_PATH = MONITOR_DIR / MONITOR_SCRIPT_NAME
 
+# The monitor's pip dependencies are installed into a dedicated venv so the
+# system Python is left untouched (Ubuntu 24.04 marks it externally managed,
+# PEP 668). The monitor service runs from this interpreter; keep it in sync
+# with the ExecStart in templates/bitcoind-monitor.service.
+MONITOR_VENV_DIR = MONITOR_DIR / "venv"
+MONITOR_VENV_PYTHON = MONITOR_VENV_DIR / "bin" / "python"
+MONITOR_VENV_PIP = MONITOR_VENV_DIR / "bin" / "pip"
+
 MONITOR_ENV = {
     "BITCOIN_RPC_SCHEME": "http",
     "BITCOIN_RPC_HOST": "localhost",
@@ -89,11 +97,13 @@ APT_PACKAGES = [
     "tree",  # Utility
     "jq",  # Utility
     "prometheus-node-exporter",  # Metrics
-    "python3-pip",  # For Bitcoind Monitor
+    "python3-venv",  # For the Bitcoind Monitor venv
 ]
 
+# Pinned so deploys are reproducible: a venv pulls from PyPI at install time, so
+# without pins two deploys could land different versions. Bump deliberately.
 PIP_PACKAGES = [
-    "prometheus_client",  # For Bitcoind Monitor
-    "python-bitcoinlib",  # For Bitcoind Monitor
-    "riprova",  # For Bitcoind Monitor
+    "prometheus_client==0.25.0",  # For Bitcoind Monitor
+    "python-bitcoinlib==0.12.2",  # For Bitcoind Monitor
+    "riprova==0.3.1",  # For Bitcoind Monitor
 ]
