@@ -166,6 +166,7 @@ class TestCharm(unittest.TestCase):
         mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.get_status.return_value = True
         mock_utils.get_rpc_proxy_env.return_value = "PROXY_LISTEN=0.0.0.0:8331"
+        mock_utils.get_rpc_proxy_version.return_value = "0.1.0"
         event = MagicMock()
         self.harness.charm._on_get_node_info_action(event)
         results = {}
@@ -174,6 +175,7 @@ class TestCharm(unittest.TestCase):
         self.assertIs(results["rpc-proxy-installed"], True)
         self.assertIs(results["rpc-proxy-running"], True)
         self.assertEqual(results["rpc-proxy-env"], "PROXY_LISTEN=0.0.0.0:8331")
+        self.assertEqual(results["rpc-proxy-version"], "0.1.0")
         mock_utils.get_status.assert_called_once_with(c.RPC_PROXY_SERVICE_NAME)
 
     @patch("charm.time.sleep")

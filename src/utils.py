@@ -386,3 +386,20 @@ def get_version() -> str:
         logger.error("Failed to parse version from %s.", output)
         return ""
     return match.groups()[0]
+
+
+def get_rpc_proxy_version() -> str:
+    """Return the installed bitcoin-rpc-proxy version, or an empty string if it can't be determined."""
+    try:
+        output = sp.run(
+            [c.RPC_PROXY_BINARY_PATH, "--version"], check=True, capture_output=True, text=True
+        ).stdout
+    except (FileNotFoundError, PermissionError, sp.CalledProcessError) as e:
+        logger.error("Failed to get version from %s. Exception: %s", c.RPC_PROXY_BINARY_PATH, e)
+        return ""
+    # Output: "bitcoin-rpc-proxy version 0.1.0 (commit 0324086, build time ...)".
+    match = re.search(r"^bitcoin-rpc-proxy version (\S+)", output, flags=re.MULTILINE)
+    if match is None:
+        logger.error("Failed to parse proxy version from %s.", output)
+        return ""
+    return match.groups()[0]

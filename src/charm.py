@@ -256,6 +256,7 @@ class BitcoinCharm(ops.CharmBase):
             event.set_results(results={"client-proc-cmdline": "process not found"})
         # RPC proxy
         event.set_results(results={"rpc-proxy-installed": utils.rpc_proxy_binary_installed()})
+        event.set_results(results={"rpc-proxy-version": utils.get_rpc_proxy_version()})
         event.set_results(results={"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
         event.set_results(results={"rpc-proxy-env": utils.get_rpc_proxy_env()})
 
