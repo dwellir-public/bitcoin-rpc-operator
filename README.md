@@ -76,12 +76,14 @@ A fresh node spends hours to days on initial block download (IBD). Two ways to s
 
 ```bash
 # on the unit, after header sync; the txoutset RPCs are not in the proxy's
-# allowlist, so use bitcoin-cli against the loopback RPC
+# allowlist, so use bitcoin-cli against the loopback RPC. bitcoin-cli is not on
+# PATH, so call it by full path as the bitcoin user (the RPC cookie and datadir
+# are owned by that user).
 juju ssh bitcoin-rpc/0
-bitcoin-cli setnetworkactive false
-bitcoin-cli -rpcclienttimeout=0 loadtxoutset /path/to/utxo-935000.dat
-bitcoin-cli setnetworkactive true
-bitcoin-cli getchainstates   # monitor background validation
+sudo -u bitcoin /home/bitcoin/bitcoin-cli setnetworkactive false
+sudo -u bitcoin /home/bitcoin/bitcoin-cli -rpcclienttimeout=0 loadtxoutset /path/to/utxo-935000.dat
+sudo -u bitcoin /home/bitcoin/bitcoin-cli setnetworkactive true
+sudo -u bitcoin /home/bitcoin/bitcoin-cli getchainstates   # monitor background validation
 ```
 
 Caveats: bandwidth cost is unchanged (full history still downloads in the background; only time-to-usable improves); works fine with pruning; `-txindex` is not built until background validation completes.
@@ -121,9 +123,13 @@ juju config bitcoin-rpc version=31.0
 - Default data directory: `/home/bitcoin/.bitcoin`
 - Configuration file: `/home/bitcoin/.bitcoin/bitcoin.conf`
   - Note: this is not in use per default, but can be used to configure the Bitcoin client. Configurations from it **WILL** override any service arguments if used.
+- Daemon binary: `/home/bitcoin/bitcoind`
+- RPC client binary: `/home/bitcoin/bitcoin-cli`
 - Service name: `bitcoind`
 - Monitor service name: `bitcoind-monitor`
 - RPC proxy service name: `bitcoin-rpc-proxy`
+
+Both `bitcoind` and `bitcoin-cli` are extracted from the same release tarball and live in the home directory. They are not on the system `PATH`, so invoke `bitcoin-cli` by its full path as the `bitcoin` user, e.g. `sudo -u bitcoin /home/bitcoin/bitcoin-cli getblockchaininfo`. The client talks to `bitcoind`'s loopback RPC directly, bypassing the proxy's method allowlist, which is what makes admin RPCs like `loadtxoutset` and `pruneblockchain` reachable on the unit.
 
 All Bitcoin client versions are available from the Bitcoin Core website: [Bitcoin client index](https://bitcoincore.org/bin/)
 

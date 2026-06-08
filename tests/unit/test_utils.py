@@ -71,10 +71,12 @@ def test_install_bitcoin_downloads_extracts_and_installs():
     tar_cmd = run.call_args_list[0].args[0]
     assert tar_cmd[:2] == ["tar", "-xzf"]
     assert tar_cmd[2].endswith(url.split("/")[-1])
-    cp_cmd = run.call_args_list[1].args[0]
-    assert cp_cmd[0] == "cp"
-    chmod_cmd = run.call_args_list[2].args[0]
-    assert chmod_cmd[0] == "chmod"
+    # Both bitcoind and bitcoin-cli are copied (each followed by a chmod +x).
+    cp_cmds = [call.args[0] for call in run.call_args_list if call.args[0][0] == "cp"]
+    copied = {cmd[2] for cmd in cp_cmds}
+    assert copied == {c.BINARY_PATH, c.CLI_PATH}
+    chmod_cmds = [call.args[0] for call in run.call_args_list if call.args[0][0] == "chmod"]
+    assert {cmd[2] for cmd in chmod_cmds} == {c.BINARY_PATH, c.CLI_PATH}
     chown.assert_called_once()
 
 

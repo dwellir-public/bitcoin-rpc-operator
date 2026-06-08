@@ -35,7 +35,11 @@ def create_user():
 
 
 def install_bitcoin(version: str):
-    """Install the bitcoind client.
+    """Install the bitcoind daemon and the bitcoin-cli RPC client.
+
+    Both binaries come from the same release tarball: bitcoind runs as the node
+    service, and bitcoin-cli lets operators reach RPCs the proxy blocks (e.g.
+    loadtxoutset) directly on bitcoind's loopback RPC.
 
     A no-op when version is empty (the config default), so a deploy without
     `version` set lands in BlockedStatus instead of erroring the install hook.
@@ -50,10 +54,11 @@ def install_bitcoin(version: str):
         tarball = Path(tmp_dir) / url.split("/")[-1]
         tarball.write_bytes(response.content)
         sp.run(["tar", "-xzf", str(tarball)], cwd=tmp_dir, check=True)
-        target_path = Path(tmp_dir) / f"bitcoin-{version}" / "bin" / c.BINARY_NAME
-        sp.run(["cp", target_path, c.BINARY_PATH], check=True)
+        bin_dir = Path(tmp_dir) / f"bitcoin-{version}" / "bin"
+        for name, dest in ((c.BINARY_NAME, c.BINARY_PATH), (c.CLI_NAME, c.CLI_PATH)):
+            sp.run(["cp", bin_dir / name, dest], check=True)
+            sp.run(["chmod", "+x", dest])
 
-    sp.run(["chmod", "+x", c.BINARY_PATH])
     chown()
 
 

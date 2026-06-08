@@ -10,6 +10,11 @@ SERVICE_NAME = "bitcoind"
 HOME_DIR = Path("/home/bitcoin")
 BINARY_NAME = "bitcoind"
 BINARY_PATH = HOME_DIR / BINARY_NAME
+# The JSON-RPC client from the same release tarball. Installed alongside bitcoind
+# so operators can drive RPCs that the proxy's allowlist blocks (e.g. loadtxoutset)
+# directly against bitcoind's loopback RPC.
+CLI_NAME = "bitcoin-cli"
+CLI_PATH = HOME_DIR / CLI_NAME
 
 # bitcoind's RPC port. The proxy fronts bitcoind on loopback only, so this is an
 # internal-only detail pinned by harden_service_args; the proxy upstream and the
