@@ -378,7 +378,10 @@ def get_version() -> str:
     except (FileNotFoundError, PermissionError, sp.CalledProcessError) as e:
         logger.error("Failed to get version from %s. Exception: %s", c.BINARY_PATH, e)
         return ""
-    match = re.search(r"^Bitcoin Core version (.*)$", output, flags=re.MULTILINE)
+    # Newer releases print "Bitcoin Core daemon version v31.0.0 bitcoind"; older
+    # ones "Bitcoin Core version v22.0.0". Match both and capture just the version
+    # token, dropping any trailing binary name.
+    match = re.search(r"^Bitcoin Core (?:daemon )?version (\S+)", output, flags=re.MULTILINE)
     if match is None:
         logger.error("Failed to parse version from %s.", output)
         return ""
