@@ -23,9 +23,9 @@ cd /path/to/bitcoin-rpc-operator
 charmcraft pack
 
 # Deploy archive node
-juju deploy ./bitcoin-rpc_ubuntu@24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -txindex=1 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
+juju deploy ./bitcoin-rpc_ubuntu@24.04-amd64.charm --base=ubuntu@24.04 --config version=31.0 --config rpc-proxy-version=0.2.1 --config service-args='-chain=main -server=1 -txindex=1 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
 # Deploy pruned node with ~10GB of data
-juju deploy ./bitcoin-rpc_ubuntu@24.04-amd64.charm --config version=31.0 --config rpc-proxy-version=0.1.0 --config service-args='-chain=main -server=1 -prune=10000 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
+juju deploy ./bitcoin-rpc_ubuntu@24.04-amd64.charm --base=ubuntu@24.04 --config version=31.0 --config rpc-proxy-version=0.2.1 --config service-args='-chain=main -server=1 -prune=10000 -rpcthreads=16 -rpcworkqueue=64 -debug=rpc' --config rpc-user=<rpc-user> --config rpc-password=<rpc-password>
 
 # metrics
 juju deploy prometheus2 prometheus
