@@ -13,6 +13,16 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
+- No changes this release.
+
+### Proxy
+
+- No changes this release.
+
+## [0.2.0] - 2026-06-09
+
+### Charm
+
 - The `upgrade-charm` hook no longer restarts a running bitcoind on a no-op
   charm upgrade. It now restarts the node only when something bitcoind actually
   consumes changed -- its systemd unit or its rendered `/etc/default/bitcoind`
@@ -52,5 +62,6 @@ vertical with no changes states `No changes this release.`
   allowlist, configurable listen address, and an admin endpoint exposing
   health and Prometheus metrics.
 
-[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/releases/tag/v0.1.0
