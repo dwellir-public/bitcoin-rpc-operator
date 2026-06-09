@@ -79,6 +79,40 @@ def test_harden_strips_negation_and_bare_forms():
     assert out.count("-disablewallet") == 1
 
 
+# update_service_args (change detection drives the conditional upgrade restart)
+
+
+@mock.patch.object(utils, "start_service")
+@mock.patch.object(utils, "stop_service")
+def test_update_service_args_reports_change(mock_stop, mock_start):
+    with mock.patch("utils.Path") as mock_path:
+        env = mock_path.return_value
+        # Missing env file renders as a change; capture what we just wrote, then
+        # feed it back and confirm an identical re-render reports no change.
+        env.exists.return_value = False
+        assert utils.update_service_args(cfg(service_args="-txindex=1"), restart_service=False) is True
+        written = env.write_text.call_args[0][0]
+        env.exists.return_value = True
+        env.read_text.return_value = written
+        assert utils.update_service_args(cfg(service_args="-txindex=1"), restart_service=False) is False
+    mock_stop.assert_not_called()  # restart_service=False never cycles bitcoind
+    mock_start.assert_not_called()
+
+
+@mock.patch.object(utils, "start_service")
+@mock.patch.object(utils, "stop_service")
+def test_update_service_args_restart_true_always_cycles(mock_stop, mock_start):
+    # The version-change path relies on restart_service=True bringing a stopped
+    # node back up, so it must stop/start regardless of whether args changed.
+    with mock.patch("utils.Path") as mock_path:
+        env = mock_path.return_value
+        env.exists.return_value = True
+        env.read_text.return_value = utils.update_service_args.__doc__  # any non-matching content
+        utils.update_service_args(cfg(), restart_service=True)
+    mock_stop.assert_called_once()
+    mock_start.assert_called_once()
+
+
 # write_rpc_proxy_env_file
 
 

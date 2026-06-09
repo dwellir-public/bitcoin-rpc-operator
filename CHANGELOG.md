@@ -13,6 +13,12 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
+- The `upgrade-charm` hook no longer restarts a running bitcoind on a no-op
+  charm upgrade. It now restarts the node only when something bitcoind actually
+  consumes changed -- its systemd unit or its rendered `/etc/default/bitcoind`
+  args -- so a pure harness/charm-code refresh leaves a synced node's RPC
+  undisturbed. `install_service_file` and `update_service_args` now report
+  whether they changed anything to drive this decision.
 - Fixed install hook failing on Ubuntu 24.04 with PEP 668
   `externally-managed-environment`: the monitor's pip dependencies
   (`prometheus_client`, `python-bitcoinlib`, `riprova`) now install into a

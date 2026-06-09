@@ -127,3 +127,43 @@ def test_get_charm_version_falls_back_to_version_file(tmp_path, monkeypatch):
 def test_get_charm_version_unknown_when_absent(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert utils.get_charm_version() == "unknown"
+
+
+# install_service_file (change detection drives the conditional upgrade restart)
+
+
+def _patch_service_file_paths(source_content, target_exists, target_content):
+    """Patch utils.Path so install_service_file sees a controlled source/target pair."""
+    src = mock.MagicMock()
+    src.read_text.return_value = source_content
+    tgt = mock.MagicMock()
+    tgt.exists.return_value = target_exists
+    tgt.read_text.return_value = target_content
+
+    def fake_path(p):
+        return tgt if "systemd" in str(p) else src
+
+    return mock.patch("utils.Path", side_effect=fake_path), src, tgt
+
+
+def test_install_service_file_skips_when_unchanged():
+    patch_path, _src, _tgt = _patch_service_file_paths("UNIT", target_exists=True, target_content="UNIT")
+    with patch_path, mock.patch("utils.shutil") as msh, mock.patch("utils.sp") as msp:
+        assert utils.install_service_file("templates/bitcoind.service", "bitcoind") is False
+        msh.copyfile.assert_not_called()
+        msp.run.assert_not_called()  # no redundant daemon-reload on an identical unit
+
+
+def test_install_service_file_installs_when_changed():
+    patch_path, _src, _tgt = _patch_service_file_paths("NEW", target_exists=True, target_content="OLD")
+    with patch_path, mock.patch("utils.shutil") as msh, mock.patch("utils.sp") as msp:
+        assert utils.install_service_file("templates/bitcoind.service", "bitcoind") is True
+        msh.copyfile.assert_called_once()
+        msp.run.assert_called_once()  # daemon-reload
+
+
+def test_install_service_file_installs_when_target_missing():
+    patch_path, _src, _tgt = _patch_service_file_paths("UNIT", target_exists=False, target_content="")
+    with patch_path, mock.patch("utils.shutil") as msh, mock.patch("utils.sp"):
+        assert utils.install_service_file("templates/bitcoind.service", "bitcoind") is True
+        msh.copyfile.assert_called_once()

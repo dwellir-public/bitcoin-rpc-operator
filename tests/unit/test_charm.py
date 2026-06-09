@@ -25,26 +25,65 @@ class TestCharm(unittest.TestCase):
         self.assertTrue(self.harness.charm.config.get("disable-wallet"))
 
     @patch("charm.utils")
-    def test_upgrade_rewrites_bitcoind_args(self, mock_utils):
+    def test_upgrade_rewrites_bitcoind_args_without_restarting(self, mock_utils):
         # Upgrade must re-render /etc/default/bitcoind so loopback-pin / wallet
-        # hardening reaches units upgraded from a pre-hardening revision, and
-        # restart bitcoind when it is running so the new args take effect.
+        # hardening reaches units upgraded from a pre-hardening revision, but the
+        # rewrite itself must not restart bitcoind -- the restart is decided
+        # separately from the unit/args change signals.
         mock_utils.service_running.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.update_service_args.assert_called_once()
-        _, kwargs = mock_utils.update_service_args.call_args
-        self.assertTrue(kwargs["restart_service"])
-
-    @patch("charm.utils")
-    def test_upgrade_does_not_restart_stopped_bitcoind(self, mock_utils):
-        # Args are still rewritten, but a stopped node is not started by an upgrade.
-        mock_utils.service_running.return_value = False
+        mock_utils.install_service_file.return_value = False
+        mock_utils.update_service_args.return_value = False
         mock_utils.get_version.return_value = "v-test"
         self.harness.charm.on.upgrade_charm.emit()
         mock_utils.update_service_args.assert_called_once()
         _, kwargs = mock_utils.update_service_args.call_args
         self.assertFalse(kwargs["restart_service"])
+
+    @patch("charm.utils")
+    def test_upgrade_restarts_bitcoind_on_args_change(self, mock_utils):
+        # A running node whose rendered args changed is restarted once so the new
+        # args take effect.
+        mock_utils.service_running.return_value = True
+        mock_utils.install_service_file.return_value = False
+        mock_utils.update_service_args.return_value = True
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.restart_service.assert_called_once()
+
+    @patch("charm.utils")
+    def test_upgrade_restarts_bitcoind_on_unit_change(self, mock_utils):
+        # A changed bitcoind.service unit also warrants a restart, even when the
+        # rendered args are unchanged.
+        mock_utils.service_running.return_value = True
+        mock_utils.install_service_file.return_value = True
+        mock_utils.update_service_args.return_value = False
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.restart_service.assert_called_once()
+
+    @patch("charm.utils")
+    def test_upgrade_does_not_restart_unchanged_bitcoind(self, mock_utils):
+        # A no-op upgrade (no unit/args change) must not disturb a running node.
+        mock_utils.service_running.return_value = True
+        mock_utils.install_service_file.return_value = False
+        mock_utils.update_service_args.return_value = False
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.restart_service.assert_not_called()
+
+    @patch("charm.utils")
+    def test_upgrade_does_not_restart_stopped_bitcoind(self, mock_utils):
+        # Args are still rewritten, but a stopped node is not started by an upgrade
+        # even when the unit/args changed.
+        mock_utils.service_running.return_value = False
+        mock_utils.install_service_file.return_value = True
+        mock_utils.update_service_args.return_value = True
+        mock_utils.get_version.return_value = "v-test"
+        self.harness.charm.on.upgrade_charm.emit()
+        mock_utils.update_service_args.assert_called_once()
+        _, kwargs = mock_utils.update_service_args.call_args
+        self.assertFalse(kwargs["restart_service"])
+        mock_utils.restart_service.assert_not_called()
 
     @patch("charm.utils")
     def test_upgrade_does_not_redownload_binaries(self, mock_utils):

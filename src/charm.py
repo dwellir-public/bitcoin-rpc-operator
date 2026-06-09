@@ -225,15 +225,19 @@ class BitcoinCharm(ops.CharmBase):
         # them up. The venv is reused in place, not torn down, so the running
         # monitor keeps serving until the explicit restart.
         utils.install_dependencies()
-        utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
+        unit_changed = utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
         self._install_bitcoind_monitor()
         utils.install_rpc_proxy_service(self.config, restart_service=False)
         utils.chown()
         if utils.service_running(c.MONITOR_SERVICE_NAME):
             utils.restart_monitor()
-        # Re-render bitcoind's args so loopback-pin / wallet hardening reaches units
-        # upgraded from a pre-hardening revision, without waiting for a config change.
-        utils.update_service_args(self.config, restart_service=utils.service_running(c.SERVICE_NAME))
+        # Re-render bitcoind's args in place (no restart here) so loopback-pin / wallet
+        # hardening reaches units upgraded from a pre-hardening revision. Restart
+        # bitcoind only if something it actually consumes changed -- its unit file or
+        # its rendered args -- so a no-op charm upgrade doesn't bounce a running node.
+        args_changed = utils.update_service_args(self.config, restart_service=False)
+        if (unit_changed or args_changed) and utils.service_running(c.SERVICE_NAME):
+            utils.restart_service()
         if utils.rpc_proxy_binary_installed():
             utils.restart_rpc_proxy()
         self._update_status()

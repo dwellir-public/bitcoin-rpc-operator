@@ -82,12 +82,20 @@ def install_dependencies() -> None:
     chown()
 
 
-def install_service_file(source_path: str, service_name: str) -> None:
-    """Install a systemd service file and reload the systemd daemon."""
+def install_service_file(source_path: str, service_name: str) -> bool:
+    """Install a systemd service file, reloading systemd. Return True if it changed.
+
+    A no-op (and no daemon-reload) when the installed unit already matches the
+    source, so callers can skip a service restart on an unchanged unit.
+    """
     logger.debug(f"Installing service file '{service_name.lower()}.service'")
     target_path = Path(f"/etc/systemd/system/{service_name.lower()}.service")
+    new_content = Path(source_path).read_text(encoding="utf-8")
+    if target_path.exists() and target_path.read_text(encoding="utf-8") == new_content:
+        return False
     shutil.copyfile(source_path, target_path)
     sp.run(["systemctl", "daemon-reload"], check=False)
+    return True
 
 
 def install_bitcoind_monitor(config: ops.ConfigData, restart_service: bool) -> None:
@@ -192,8 +200,14 @@ def service_running(service_name: str, iterations: int = 4) -> bool:
     return False
 
 
-def update_service_args(config: ops.ConfigData, restart_service: bool) -> None:
-    """Update the service arguments for the Bitcoin service."""
+def update_service_args(config: ops.ConfigData, restart_service: bool) -> bool:
+    """Update the Bitcoin service arguments. Return True if the rendered file changed.
+
+    When restart_service is True bitcoind is stopped before and started after the
+    rewrite unconditionally (the version-change path relies on this to bring a
+    deliberately stopped node back up). The returned change flag lets callers that
+    pass restart_service=False decide whether a restart is actually warranted.
+    """
     if restart_service:
         stop_service()
     # Get service args from config
@@ -210,11 +224,14 @@ def update_service_args(config: ops.ConfigData, restart_service: bool) -> None:
     if rpc_user and rpc_password:
         service_args += f" -rpcuser={rpc_user} -rpcpassword={rpc_password}"
 
-    with open(f"/etc/default/{c.SERVICE_NAME}", "w") as f:
-        f.write(f'{c.SERVICE_NAME.upper()}_CLI_ARGS="{service_args}"')
+    env_path = Path(f"/etc/default/{c.SERVICE_NAME}")
+    new_content = f'{c.SERVICE_NAME.upper()}_CLI_ARGS="{service_args}"'
+    changed = not env_path.exists() or env_path.read_text(encoding="utf-8") != new_content
+    env_path.write_text(new_content, encoding="utf-8")
 
     if restart_service:
         start_service()
+    return changed
 
 
 # bitcoind options that are additive (multiple values accumulate), so they must be
