@@ -13,6 +13,16 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
+- No changes this release.
+
+### Proxy
+
+- No changes this release.
+
+## [0.2.1] - 2026-06-09
+
+### Charm
+
 - Fixed `upgrade-charm`/`config-changed` failing with `OSError: [Errno 26]
   Text file busy` when re-installing the proxy binary. `install_rpc_proxy` now
   downloads to a temp file and atomically `os.replace`s it over
@@ -66,6 +76,7 @@ vertical with no changes states `No changes this release.`
   allowlist, configurable listen address, and an admin endpoint exposing
   health and Prometheus metrics.
 
-[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/releases/tag/v0.1.0
