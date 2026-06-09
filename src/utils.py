@@ -3,6 +3,7 @@
 """Helper functions for installing and operating the Bitcoin client."""
 
 import logging
+import os
 import re
 import shutil
 import subprocess as sp
@@ -122,8 +123,20 @@ def install_rpc_proxy(version: str) -> None:
     # mistake for a working binary.
     response = requests.get(url, timeout=600)
     response.raise_for_status()
-    c.RPC_PROXY_BINARY_PATH.write_bytes(response.content)
-    c.RPC_PROXY_BINARY_PATH.chmod(0o755)
+    # Write to a temp file in the same directory and atomically replace, so we
+    # never write in place over the running binary (the kernel rejects that with
+    # ETXTBSY). os.replace swaps the directory entry to a fresh inode; the running
+    # process keeps its old, now-unlinked inode until it is restarted.
+    dest = c.RPC_PROXY_BINARY_PATH
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(response.content)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, dest)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     chown()
 
 

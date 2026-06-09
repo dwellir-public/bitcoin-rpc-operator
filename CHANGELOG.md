@@ -13,7 +13,11 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
-- No changes this release.
+- Fixed `upgrade-charm`/`config-changed` failing with `OSError: [Errno 26]
+  Text file busy` when re-installing the proxy binary. `install_rpc_proxy` now
+  downloads to a temp file and atomically `os.replace`s it over
+  `/home/bitcoin/bitcoin-rpc-proxy`, so the write no longer collides with the
+  running `bitcoin-rpc-proxy` service (`ETXTBSY`).
 
 ### Proxy
 

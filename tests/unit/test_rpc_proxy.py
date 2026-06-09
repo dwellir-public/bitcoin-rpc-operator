@@ -182,6 +182,27 @@ def test_install_rpc_proxy_substitutes_version_and_sets_exec_bit(tmp_path):
     chown.assert_called_once()
 
 
+def test_install_rpc_proxy_replaces_running_binary_atomically(tmp_path):
+    # The proxy service holds the old binary open; writing in place would fail
+    # with ETXTBSY. The atomic replace must swap the file to a fresh inode and
+    # leave no temp files behind in the directory.
+    binpath = tmp_path / "bitcoin-rpc-proxy"
+    binpath.write_bytes(b"old-binary")
+    old_inode = binpath.stat().st_ino
+    with (
+        mock.patch("utils.requests.get") as get,
+        mock.patch("utils.c.RPC_PROXY_BINARY_PATH", binpath),
+        mock.patch("utils.chown"),
+    ):
+        get.return_value.content = b"new-binary"
+        utils.install_rpc_proxy("1.2.3")
+
+    assert binpath.read_bytes() == b"new-binary"
+    assert binpath.stat().st_ino != old_inode
+    assert binpath.stat().st_mode & 0o111
+    assert list(tmp_path.iterdir()) == [binpath]
+
+
 def test_install_rpc_proxy_failed_download_leaves_no_file(tmp_path):
     # A 404 (e.g. unreleased version) must not leave a partial file behind,
     # or rpc_proxy_binary_installed() would report a garbage binary as installed.
