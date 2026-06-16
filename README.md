@@ -167,19 +167,38 @@ If the credentials aren't acting as a real authentication layer — for example 
 
 #### curl examples
 
-If the user and password are handled, making requests to a Bitcoin node is no different than with other blockchains. Here are some examples:
+##### Quick usage
+
+The proxy accepts a bare JSON-RPC `POST` with no `--user` and no `content-type` header, so the shortest call that works is:
 
 ```bash
-curl --user <rpc-user>:<rpc-password> -d '{"jsonrpc": "2.0", "id": "1", "method": "getblockchaininfo", "params": []}' -H 'content-type: application/json' http://<unit-ip>:8331
-
-curl --user <rpc-user>:<rpc-password> -d '{"jsonrpc": "1.1", "id": "1", "method": "getbestblockhash", "params": []}' -H 'content-type: application/json' http://<unit-ip>:8331
-
-curl -d '{"jsonrpc": "1.0", "id": "curltest", "method": "getblockstats", "params": ["00000000000000000000aa5be5529776f87e5d53d0201420af66cef91c88c4ca", ["time","height"]]}' -H 'content-type: application/json' http://<rpc-user>:<rpc-password>@<unit-ip>:8331
+curl -d '{"jsonrpc":"1.0","id":"test","method":"getblockchaininfo","params":[]}' http://<unit-ip>:8331
 ```
 
-Note a few variations in these commands:
-- Several `jsonrpc` versions are used, `1.0`, `1.1` and `2.0`. The Bitcoin node did not always support `2.0` but does from some time back ([source](https://github.com/bitcoin/bitcoin/pull/27101)).
-- The user and password are set in different ways, either as a part of the URL or as a part of the request body.
+Whether credentials are required depends on the deployment: if a gateway in front attaches them (see [User and password](#user-and-password)) the bare form above is enough; otherwise add `--user <rpc-user>:<rpc-password>`.
+
+##### Through the proxy
+
+Making requests to a Bitcoin node is no different than with other blockchains. The examples below target the proxy port (`8331`) and omit credentials, matching the common "gateway handles auth" setup. If your proxy enforces auth, prepend `--user <rpc-user>:<rpc-password>`.
+
+```bash
+curl -d '{"jsonrpc": "2.0", "id": "1", "method": "getblockchaininfo", "params": []}' -H 'content-type: application/json' http://<unit-ip>:8331
+
+curl -d '{"jsonrpc": "1.1", "id": "1", "method": "getbestblockhash", "params": []}' -H 'content-type: application/json' http://<unit-ip>:8331
+
+curl -d '{"jsonrpc": "1.0", "id": "curltest", "method": "getblockstats", "params": ["00000000000000000000aa5be5529776f87e5d53d0201420af66cef91c88c4ca", ["time","height"]]}' -H 'content-type: application/json' http://<unit-ip>:8331
+```
+
+Note that several `jsonrpc` versions are used, `1.0`, `1.1` and `2.0`. The Bitcoin node did not always support `2.0` but does from some time back ([source](https://github.com/bitcoin/bitcoin/pull/27101)).
+
+##### Directly against bitcoind on the unit
+
+To bypass the proxy's method allowlist, `juju ssh` into the unit and query `bitcoind`'s loopback RPC on `8332`. `bitcoind` requires auth here, so pass the `rpc-user`/`rpc-password` config values:
+
+```bash
+juju ssh bitcoin-rpc/0
+curl --user <rpc-user>:<rpc-password> -d '{"jsonrpc": "1.0", "id": "test", "method": "getblockchaininfo", "params": []}' -H 'content-type: application/json' http://127.0.0.1:8332
+```
 
 #### RPC proxy
 
