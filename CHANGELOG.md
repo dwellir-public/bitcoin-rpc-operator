@@ -13,7 +13,10 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
-- No changes this release.
+- Event log entries now carry context: `config-changed` records which tracked
+  config keys changed and their new values (`rpc-password` redacted), and
+  `upgrade-charm` records the target charm version. `get-node-info` truncates
+  each entry's detail for its compact view; `print-event-log` keeps it in full.
 
 ### Proxy
 

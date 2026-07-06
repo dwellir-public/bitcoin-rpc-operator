@@ -283,6 +283,55 @@ class TestCharm(unittest.TestCase):
         self.assertEqual(len(lines), 21)
         self.assertEqual(self._log_names(lines)[-1], "print-event-log")
 
+    @patch("charm.utils")
+    def test_config_changed_records_changed_keys(self, mock_utils):
+        # config-changed annotates which tracked keys changed and their new values.
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        self.harness.update_config({"service-args": "-txindex=1", "disable-wallet": False})
+        entry = list(self.harness.charm._stored.event_log)[-1]
+        self.assertIn("config-changed  ", entry)
+        self.assertIn("service-args=-txindex=1", entry)
+        self.assertIn("disable-wallet=False", entry)
+
+    @patch("charm.utils")
+    def test_config_changed_redacts_rpc_password(self, mock_utils):
+        # The password value is never echoed; only that it changed is recorded.
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        self.harness.update_config({"rpc-password": "hunter2-super-secret"})
+        entry = list(self.harness.charm._stored.event_log)[-1]
+        self.assertIn("rpc-password=<redacted>", entry)
+        self.assertNotIn("hunter2", entry)
+
+    @patch("charm.utils")
+    def test_node_info_truncates_long_event_detail(self, mock_utils):
+        # A long detail is capped in the node-info view; print-event-log keeps it whole.
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        long_detail = "service-args=" + "x" * 100
+        self.harness.charm._stored.event_log = [f"2026-07-06 00:00:00 UTC  config-changed  {long_detail}"]
+        info_event, print_event = MagicMock(), MagicMock()
+        self.harness.charm._on_get_node_info_action(info_event)
+        self.harness.charm._on_print_event_log_action(print_event)
+        info_results = {}
+        for call in info_event.set_results.call_args_list:
+            info_results.update(call.kwargs["results"])
+        config_line = next(ln for ln in info_results["event-log"].split("\n") if "config-changed" in ln)
+        self.assertTrue(config_line.endswith("..."))
+        self.assertIn(long_detail, print_event.set_results.call_args.kwargs["results"]["event-log"])
+
+    @patch("charm.utils")
+    def test_upgrade_charm_records_target_version(self, mock_utils):
+        # upgrade-charm annotates the version being upgraded to.
+        mock_utils.get_charm_version.return_value = "v0.4.0"
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        self.harness.charm.on.upgrade_charm.emit()
+        entry = list(self.harness.charm._stored.event_log)[-1]
+        self.assertEqual(entry.split("  ", 1)[-1], "upgrade-charm  v0.4.0")
+
 
 class TestEventLogPersistence(unittest.TestCase):
     """Scenario-based tests for StoredState serialization of the event log.
