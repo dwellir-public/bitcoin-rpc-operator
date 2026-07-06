@@ -7,7 +7,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import ops.testing
+from ops.testing import Context, State, StoredState
 
+import charm as charm_module
 import constants as c
 from charm import BitcoinCharm
 
@@ -228,3 +230,84 @@ class TestCharm(unittest.TestCase):
         self.harness.charm._on_restart_node_action(MagicMock())
         mock_utils.start_service.assert_called_once()
         mock_utils.restart_rpc_proxy.assert_called_once()
+
+    @staticmethod
+    def _log_names(log):
+        # Names are recoverable from the flat "<timestamp>  <name>" lines.
+        return [line.rsplit("  ", 1)[-1] for line in log]
+
+    @patch("charm.utils")
+    def test_event_log_records_hooks_and_actions_in_order(self, mock_utils):
+        # A lifecycle hook and an action both land in the log, in the order run.
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        self.harness.charm.on.config_changed.emit()
+        self.harness.charm._on_get_node_help_action(MagicMock())
+        names = self._log_names(list(self.harness.charm._stored.event_log))
+        self.assertIn("config-changed", names)
+        self.assertIn("get-node-help", names)
+        self.assertLess(names.index("config-changed"), names.index("get-node-help"))
+
+    def test_event_log_cap_enforced(self):
+        # The ring buffer keeps only the newest _EVENT_LOG_MAX entries.
+        with patch.object(charm_module, "_EVENT_LOG_MAX", 3):
+            for i in range(5):
+                self.harness.charm._record_event(f"e{i}")
+        names = self._log_names(list(self.harness.charm._stored.event_log))
+        self.assertEqual(names, ["e2", "e3", "e4"])
+
+    @patch("charm.utils")
+    def test_node_info_action_truncates_event_log_to_16(self, mock_utils):
+        # node-info shows only the latest 16 entries, newest last.
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        self.harness.charm._stored.event_log = [f"2026-07-06 00:00:{i:02d} UTC  e{i}" for i in range(20)]
+        event = MagicMock()
+        self.harness.charm._on_get_node_info_action(event)
+        results = {}
+        for call in event.set_results.call_args_list:
+            results.update(call.kwargs["results"])
+        lines = results["event-log"].split("\n")
+        self.assertEqual(len(lines), 16)
+        # The action records itself, so the newest line is get-node-info.
+        self.assertEqual(self._log_names(lines)[-1], "get-node-info")
+
+    def test_print_event_log_action_returns_full_log(self):
+        # print-event-log dumps the whole history (plus its own invocation).
+        self.harness.charm._stored.event_log = [f"2026-07-06 00:00:{i:02d} UTC  e{i}" for i in range(20)]
+        event = MagicMock()
+        self.harness.charm._on_print_event_log_action(event)
+        results = event.set_results.call_args.kwargs["results"]
+        lines = results["event-log"].split("\n")
+        self.assertEqual(len(lines), 21)
+        self.assertEqual(self._log_names(lines)[-1], "print-event-log")
+
+
+class TestEventLogPersistence(unittest.TestCase):
+    """Scenario-based tests for StoredState serialization of the event log.
+
+    The in-process Harness never triggers the load-time StoredList wrapping that
+    breaks nested-container designs, so the round-trip that proves the flat-string
+    design survives a real load-modify-save must run under Scenario.
+    """
+
+    @patch("charm.utils")
+    def test_event_log_survives_load_and_append(self, mock_utils):
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        ctx = Context(BitcoinCharm)
+        seeded = StoredState(
+            "_stored",
+            owner_path="BitcoinCharm",
+            content={"event_log": ["2026-07-06 00:00:00 UTC  install"]},
+        )
+        state_in = State(stored_states={seeded})
+        # config-changed loads the seeded log, appends, and re-saves it. A nested
+        # container here would raise ValueError on save; a flat list[str] does not.
+        state_out = ctx.run(ctx.on.config_changed(), state_in)
+        stored = state_out.get_stored_state("_stored", owner_path="BitcoinCharm")
+        names = [line.rsplit("  ", 1)[-1] for line in stored.content["event_log"]]
+        self.assertEqual(names, ["install", "config-changed"])

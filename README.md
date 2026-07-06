@@ -221,6 +221,17 @@ The `bitcoin-rpc` charm provides Prometheus metrics interfaces. These can be scr
 
 The blockchain metrics are built by the [bitcoind-monitor.py](./templates/bitcoind-monitor.py) script from the [Bitcoin Prometheus exporter] repository, slightly modified. The script is run as a service on the unit and exposes the metrics on the unit's IP address and a specific port (set in [charm.py](./src/charm.py)).
 
+## Event log
+
+The charm keeps a rolling, timestamped log of every lifecycle hook and action it runs, so an operator can see what a unit has actually done, and when, without shelling into the machine. Each entry is a UTC-timestamped line naming the Juju event.
+
+Two actions expose it:
+
+- `get-node-info` includes an `event-log` field with the **latest 16** entries, inline alongside the other diagnostics for a quick recent view.
+- `print-event-log` dumps the **full history** (up to the most recent 256 entries; older entries roll off).
+
+Tracked events: `install`, `config-changed`, `upgrade-charm`, `start`, `stop`, and every action (`get-node-help`, `get-node-info`, `print-event-log`, `print-readme`, `restart-node`, `start-node`, `stop-node`). `update-status` is deliberately excluded: it fires automatically every few minutes and would churn the log with no diagnostic value.
+
 ## Known limitations
 
 - **Mainnet only.** The RPC proxy and the monitor both target `bitcoind`'s mainnet RPC port (`8332`), which the charm pins via `-rpcport`. Selecting another network through `service-args` (`-testnet`, `-signet`, `-regtest`) is not supported: `bitcoind` would still listen on the pinned port, but the rest of the network switch (P2P port, data directory, allowlist relevance) is unhandled. See [docs/TODO.md](./docs/TODO.md) for the open research item.
