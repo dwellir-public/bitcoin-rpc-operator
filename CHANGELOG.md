@@ -13,7 +13,11 @@ vertical with no changes states `No changes this release.`
 
 ### Charm
 
-- No changes this release.
+- Added a rolling, timestamped event log: the charm records every lifecycle
+  hook (`install`, `config-changed`, `upgrade-charm`, `start`, `stop`) and
+  every action it runs (`update-status` excluded). `get-node-info` now reports
+  the latest 16 entries, and a new `print-event-log` action dumps the full
+  history (up to the most recent 256 entries).
 
 ### Proxy
 

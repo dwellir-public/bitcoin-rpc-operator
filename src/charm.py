@@ -20,6 +20,10 @@ from interface_prometheus import PrometheusProvider
 
 logger = logging.getLogger(__name__)
 
+# Cap on the rolling event log kept in StoredState. Persisted into the unit
+# database, so bound it (ring buffer) to keep the log from growing unbounded.
+_EVENT_LOG_MAX = 256
+
 
 class BitcoinCharm(ops.CharmBase):
     """Charm the Bitcoin blockchain client."""
@@ -52,14 +56,28 @@ class BitcoinCharm(ops.CharmBase):
             rpc_proxy_listen=self.config.get("rpc-proxy-listen"),
             rpc_proxy_extend_allowlist=self.config.get("rpc-proxy-extend-allowlist"),
             disable_wallet=self.config.get("disable-wallet"),
+            event_log=[],
         )
         # Actions
         self.framework.observe(self.on.get_node_help_action, self._on_get_node_help_action)
         self.framework.observe(self.on.get_node_info_action, self._on_get_node_info_action)
+        self.framework.observe(self.on.print_event_log_action, self._on_print_event_log_action)
         self.framework.observe(self.on.print_readme_action, self._on_print_readme_action)
         self.framework.observe(self.on.restart_node_action, self._on_restart_node_action)
         self.framework.observe(self.on.start_node_action, self._on_start_node_action)
         self.framework.observe(self.on.stop_node_action, self._on_stop_node_action)
+
+    def _record_event(self, name: str) -> None:
+        """Append a timestamped entry for `name` to the rolling event log.
+
+        Entries are flat, fixed-width strings ("YYYY-MM-DD HH:MM:SS UTC  name")
+        so lexical order matches chronological order and StoredState never wraps
+        them in a StoredList (which nested containers would trigger). The slice
+        keeps only the newest _EVENT_LOG_MAX entries.
+        """
+        log = list(self._stored.event_log)
+        log.append(f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}  {name}")
+        self._stored.event_log = log[-_EVENT_LOG_MAX:]
 
     def _on_config_changed(self, event: ops.ConfigChangedEvent):
         """Handle changed configuration, restarting bitcoind at most once.
@@ -68,6 +86,7 @@ class BitcoinCharm(ops.CharmBase):
         restarting inline; a single update_service_args at the end applies them, so
         changing several options in one event costs one restart, not several.
         """
+        self._record_event("config-changed")
         restart_bitcoind = False
 
         if self._stored.rpc_user != self.config.get("rpc-user") or self._stored.rpc_password != self.config.get(
@@ -127,6 +146,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_install(self, event):
         """Handle install."""
+        self._record_event("install")
         utils.create_user()
         utils.install_dependencies()
         self._install_bitcoind()
@@ -165,6 +185,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_start(self, event):
         """Handle start."""
+        self._record_event("start")
         utils.start_service()
         utils.start_monitor()
         if utils.rpc_proxy_binary_installed():
@@ -173,6 +194,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_stop(self, event):
         """Handle stop."""
+        self._record_event("stop")
         utils.stop_service()
         utils.stop_monitor()
         utils.stop_rpc_proxy()
@@ -214,6 +236,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_upgrade_charm(self, event):
         """Handle upgrade charm event."""
+        self._record_event("upgrade-charm")
         # Re-apply charm logic (unit files, env, args) to the existing host. The
         # bitcoind and proxy binaries are version-driven (config) and handled in
         # _on_config_changed, so neither is re-downloaded here; upgrade should not
@@ -243,10 +266,12 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_get_node_help_action(self, event: ops.ActionEvent) -> None:
+        self._record_event("get-node-help")
         event.set_results(results={"help-output": utils.get_client_help_output()})
 
     def _on_get_node_info_action(self, event: ops.ActionEvent) -> None:
         """Provide information about the node to the action's results."""
+        self._record_event("get-node-info")
         # Charm
         event.set_results(results={"charm-version": utils.get_charm_version()})
         # Disk usage
@@ -265,12 +290,22 @@ class BitcoinCharm(ops.CharmBase):
         event.set_results(results={"rpc-proxy-version": utils.get_rpc_proxy_version()})
         event.set_results(results={"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
         event.set_results(results={"rpc-proxy-env": utils.get_rpc_proxy_env()})
+        # Event log (latest 16 to keep the combined output readable; use
+        # print-event-log for the full history).
+        event.set_results(results={"event-log": "\n".join(list(self._stored.event_log)[-16:])})
+
+    def _on_print_event_log_action(self, event: ops.ActionEvent) -> None:
+        """Print the full recorded event log to the action's results."""
+        self._record_event("print-event-log")
+        event.set_results(results={"event-log": "\n".join(self._stored.event_log)})
 
     def _on_print_readme_action(self, event: ops.ActionEvent) -> None:
         """Print the README.md file to the action's results."""
+        self._record_event("print-readme")
         event.set_results(results={"readme": utils.get_readme()})
 
     def _on_restart_node_action(self, event: ops.ActionEvent) -> None:
+        self._record_event("restart-node")
         self.unit.status = ops.MaintenanceStatus("Restarting node services...")
         utils.stop_service()
         time.sleep(3)  # Wait for the containers to properly stop
@@ -281,6 +316,7 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_start_node_action(self, event: ops.ActionEvent) -> None:
+        self._record_event("start-node")
         self.unit.status = ops.MaintenanceStatus("Starting node services...")
         utils.start_service()
         utils.start_monitor()
@@ -289,6 +325,7 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_stop_node_action(self, event: ops.ActionEvent) -> None:
+        self._record_event("stop-node")
         self.unit.status = ops.MaintenanceStatus("Stopping node services...")
         utils.stop_monitor()
         utils.stop_service()

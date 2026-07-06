@@ -117,6 +117,9 @@ actions:
     description: |
       Gets system information about the node for debugging purposes,
       including bitcoind and rpc-proxy status.
+  print-event-log:
+    description: |
+      Prints the full recorded event log (up to 256 latest events).
   print-readme:
     description: |
       Prints this charm's README, with usage and configuration details, to the action output.
