@@ -24,6 +24,42 @@ logger = logging.getLogger(__name__)
 # database, so bound it (ring buffer) to keep the log from growing unbounded.
 _EVENT_LOG_MAX = 256
 
+# Config keys whose value must never be echoed into the event log.
+_SENSITIVE_CONFIG = {"rpc-password"}
+
+# (config-key, stored-attr) pairs the charm diffs on config-changed. Kept in sync
+# with the per-key comparisons in _on_config_changed so the recorded summary
+# matches what the handler actually acts on.
+_TRACKED_CONFIG = (
+    ("rpc-user", "rpc_user"),
+    ("rpc-password", "rpc_password"),
+    ("service-args", "service_args"),
+    ("version", "version"),
+    ("rpc-proxy-filter", "rpc_proxy_filter"),
+    ("rpc-proxy-version", "rpc_proxy_version"),
+    ("rpc-proxy-listen", "rpc_proxy_listen"),
+    ("rpc-proxy-extend-allowlist", "rpc_proxy_extend_allowlist"),
+    ("disable-wallet", "disable_wallet"),
+)
+
+# Width the event-log detail (the part after the event name) is truncated to in
+# the get-node-info compact view. print-event-log keeps the full detail.
+_EVENT_DETAIL_WIDTH = 32
+
+
+def _truncate_event_detail(line: str, width: int = _EVENT_DETAIL_WIDTH) -> str:
+    """Return `line` with its trailing detail (after "<timestamp>  <name>") capped at `width` chars.
+
+    Entries without a detail (plain "<timestamp>  <name>") are returned unchanged.
+    """
+    parts = line.split("  ", 2)
+    if len(parts) < 3:
+        return line
+    timestamp, name, detail = parts
+    if len(detail) > width:
+        detail = detail[:width] + "..."
+    return f"{timestamp}  {name}  {detail}"
+
 
 class BitcoinCharm(ops.CharmBase):
     """Charm the Bitcoin blockchain client."""
@@ -79,6 +115,22 @@ class BitcoinCharm(ops.CharmBase):
         log.append(f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}  {name}")
         self._stored.event_log = log[-_EVENT_LOG_MAX:]
 
+    def _config_change_summary(self) -> str:
+        """Summarize tracked config keys changed since last seen, as comma-joined key=value pairs.
+
+        Reads the pre-update _stored values, so call it before those values are
+        refreshed. rpc-password is redacted; other values are recorded in full
+        (get-node-info truncates them for its compact view, print-event-log keeps
+        them whole). Returns an empty string when nothing tracked changed.
+        """
+        changes = []
+        for key, attr in _TRACKED_CONFIG:
+            new = self.config.get(key)
+            if getattr(self._stored, attr) == new:
+                continue
+            changes.append(f"{key}=<redacted>" if key in _SENSITIVE_CONFIG else f"{key}={new}")
+        return ", ".join(changes)
+
     def _on_config_changed(self, event: ops.ConfigChangedEvent):
         """Handle changed configuration, restarting bitcoind at most once.
 
@@ -86,7 +138,8 @@ class BitcoinCharm(ops.CharmBase):
         restarting inline; a single update_service_args at the end applies them, so
         changing several options in one event costs one restart, not several.
         """
-        self._record_event("config-changed")
+        summary = self._config_change_summary()
+        self._record_event(f"config-changed  {summary}" if summary else "config-changed")
         restart_bitcoind = False
 
         if self._stored.rpc_user != self.config.get("rpc-user") or self._stored.rpc_password != self.config.get(
@@ -236,7 +289,9 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_upgrade_charm(self, event):
         """Handle upgrade charm event."""
-        self._record_event("upgrade-charm")
+        # The upgrade-charm hook runs the new charm code from the new charm dir, so
+        # get_charm_version() here is the version being upgraded to.
+        self._record_event(f"upgrade-charm  {utils.get_charm_version()}")
         # Re-apply charm logic (unit files, env, args) to the existing host. The
         # bitcoind and proxy binaries are version-driven (config) and handled in
         # _on_config_changed, so neither is re-downloaded here; upgrade should not
@@ -290,9 +345,10 @@ class BitcoinCharm(ops.CharmBase):
         event.set_results(results={"rpc-proxy-version": utils.get_rpc_proxy_version()})
         event.set_results(results={"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
         event.set_results(results={"rpc-proxy-env": utils.get_rpc_proxy_env()})
-        # Event log (latest 16 to keep the combined output readable; use
-        # print-event-log for the full history).
-        event.set_results(results={"event-log": "\n".join(list(self._stored.event_log)[-16:])})
+        # Event log (latest 16 to keep the combined output readable, with each
+        # entry's detail truncated; use print-event-log for the full history).
+        recent = [_truncate_event_detail(line) for line in list(self._stored.event_log)[-16:]]
+        event.set_results(results={"event-log": "\n".join(recent)})
 
     def _on_print_event_log_action(self, event: ops.ActionEvent) -> None:
         """Print the full recorded event log to the action's results."""

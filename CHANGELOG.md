@@ -19,6 +19,19 @@ vertical with no changes states `No changes this release.`
 
 - No changes this release.
 
+## [0.4.0] - 2026-07-06
+
+### Charm
+
+- Event log entries now carry context: `config-changed` records which tracked
+  config keys changed and their new values (`rpc-password` redacted), and
+  `upgrade-charm` records the target charm version. `get-node-info` truncates
+  each entry's detail for its compact view; `print-event-log` keeps it in full.
+
+### Proxy
+
+- No changes this release.
+
 ## [0.3.0] - 2026-07-06
 
 ### Charm
@@ -91,7 +104,8 @@ vertical with no changes states `No changes this release.`
   allowlist, configurable listen address, and an admin endpoint exposing
   health and Prometheus metrics.
 
-[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.1.0...v0.2.0
