@@ -82,8 +82,10 @@ func (a *App) Run(ctx context.Context) error {
 	go func() { errCh <- a.adminServer.Start() }()
 
 	var startErr error
+	consumed := 0
 	select {
 	case startErr = <-errCh:
+		consumed = 1
 	case <-signalCtx.Done():
 		a.logger.Info().Msg("shutdown signal received")
 	}
@@ -94,7 +96,14 @@ func (a *App) Run(ctx context.Context) error {
 	// an already-expired context to Server.Shutdown and skip the connection drain.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout)
 	defer cancel()
-	return errors.Join(startErr, a.shutdown(shutdownCtx))
+	shutdownErr := a.shutdown(shutdownCtx)
+	// Each Start() goroutine sends exactly once; shutdown guarantees both have
+	// returned, so collect any results we haven't read yet. This keeps a second
+	// bind failure from being silently dropped (graceful stops send nil).
+	for i := consumed; i < serverCount; i++ {
+		startErr = errors.Join(startErr, <-errCh)
+	}
+	return errors.Join(startErr, shutdownErr)
 }
 
 func (a *App) shutdown(ctx context.Context) error {

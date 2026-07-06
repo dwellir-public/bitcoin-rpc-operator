@@ -35,7 +35,6 @@ MONITOR_SCRIPT_PATH = MONITOR_DIR / MONITOR_SCRIPT_NAME
 # PEP 668). The monitor service runs from this interpreter; keep it in sync
 # with the ExecStart in templates/bitcoind-monitor.service.
 MONITOR_VENV_DIR = MONITOR_DIR / "venv"
-MONITOR_VENV_PYTHON = MONITOR_VENV_DIR / "bin" / "python"
 MONITOR_VENV_PIP = MONITOR_VENV_DIR / "bin" / "pip"
 
 MONITOR_ENV = {

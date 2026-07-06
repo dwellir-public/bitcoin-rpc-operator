@@ -8,7 +8,7 @@ from ops.framework import Object
 
 
 class PrometheusProvider(Object):
-    """Prometheus  provider interface."""
+    """Prometheus provider interface."""
 
     def __init__(self, charm, relation_name, port, path, **job_data):
         """Attach a dictionary containing job data.
@@ -20,7 +20,7 @@ class PrometheusProvider(Object):
         super().__init__(charm, relation_name)
         uuid = str(uuid4())
         self.job = {
-            "job_name": f"{relation_name}",
+            "job_name": relation_name,
             "job_data": {
                 "honor_timestamps": True,
                 "scrape_interval": "15s",

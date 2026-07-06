@@ -66,6 +66,10 @@ config:
       description: |
         Arguments to pass to the Bitcoin client run.
         See all available options by running --help on the client.
+        Note: the charm manages the RPC endpoint and wallet flags itself.
+        `-rpcbind`, `-rpcallowip`, and `-rpcport` are stripped or pinned so
+        bitcoind stays loopback-only behind the proxy, and wallet flags are
+        stripped when `disable-wallet` is set; setting these here has no effect.
       default: ""
     version:
       type: string

@@ -81,7 +81,7 @@ func TestBaselineMatchesSafeTier(t *testing.T) {
 	require.NoError(t, err)
 
 	var safe []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			continue
 		}

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,9 +17,7 @@ func post(t *testing.T, srv *httptest.Server, body string, header http.Header) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	for k, vs := range header {
-		req.Header[k] = vs
-	}
+	maps.Copy(req.Header, header)
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)

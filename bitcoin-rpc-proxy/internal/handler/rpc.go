@@ -203,10 +203,12 @@ func envelopeErrorBody(env *rpc.Envelope, code int, msg string) json.RawMessage 
 		}
 		return marshalArray(parts)
 	}
-	if len(env.Calls) == 1 {
-		return env.Calls[0].ErrorReply(code, msg)
+	// A non-batch envelope always parses to exactly one call; guard the empty
+	// case defensively rather than indexing blindly.
+	if len(env.Calls) == 0 {
+		return simpleError(code, msg)
 	}
-	return simpleError(code, msg)
+	return env.Calls[0].ErrorReply(code, msg)
 }
 
 // simpleError builds a standalone V1 error with a null id, for failures with no

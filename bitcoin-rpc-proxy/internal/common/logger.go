@@ -4,6 +4,7 @@ package common
 import (
 	"fmt"
 	"os"
+	"path"
 	"runtime"
 	"strings"
 	"time"
@@ -34,14 +35,7 @@ func (h callerHook) Run(e *zerolog.Event, level zerolog.Level, _ string) {
 	if !ok {
 		return
 	}
-	short := file
-	for i := len(file) - 1; i > 0; i-- {
-		if file[i] == '/' {
-			short = file[i+1:]
-			break
-		}
-	}
-	e.Str("caller", fmt.Sprintf("%s:%d", short, line))
+	e.Str("caller", fmt.Sprintf("%s:%d", path.Base(file), line))
 }
 
 // NewLogger returns a zerolog.Logger with pretty console output at INFO level.

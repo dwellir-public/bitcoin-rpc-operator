@@ -74,11 +74,6 @@ func NewClient(baseURL string, timeout time.Duration) *Client {
 	}
 }
 
-// BaseURL returns the configured upstream base URL.
-func (c *Client) BaseURL() string {
-	return c.baseURL
-}
-
 // SetUpstreamAuth configures Basic credentials injected into forwarded requests
 // that arrive without an Authorization header. A caller-supplied Authorization
 // always takes precedence. An empty user disables injection. Call once before

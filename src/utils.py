@@ -58,7 +58,7 @@ def install_bitcoin(version: str):
         bin_dir = Path(tmp_dir) / f"bitcoin-{version}" / "bin"
         for name, dest in ((c.BINARY_NAME, c.BINARY_PATH), (c.CLI_NAME, c.CLI_PATH)):
             sp.run(["cp", bin_dir / name, dest], check=True)
-            sp.run(["chmod", "+x", dest])
+            sp.run(["chmod", "+x", dest], check=True)
 
     chown()
 
@@ -344,8 +344,7 @@ def write_monitor_env_file(config: ops.ConfigData) -> None:
 def get_client_help_output() -> str:
     """Return the output of the client binary's --help, or an error message."""
     if c.BINARY_PATH.exists():
-        command = f".{c.BINARY_PATH} --help"
-        process = sp.run(command, stdout=sp.PIPE, cwd="/", shell=True, check=False)
+        process = sp.run([str(c.BINARY_PATH), "--help"], stdout=sp.PIPE, check=False)
         if process.returncode == 0:
             return process.stdout.decode("utf-8").strip()
         return "Could not parse client binary '--help' command"
@@ -355,8 +354,9 @@ def get_client_help_output() -> str:
 def get_client_proc_cmdline() -> str:
     """Return the running client's process command line, or an empty string."""
     command = ["pgrep", c.SERVICE_NAME]
-    proc_id = sp.run(command, capture_output=True, check=False).stdout.decode("utf-8").strip()
-    if proc_id:
+    pgrep_output = sp.run(command, capture_output=True, check=False).stdout.decode("utf-8").split()
+    if pgrep_output:
+        proc_id = pgrep_output[0]
         command = ["cat", f"/proc/{proc_id}/cmdline"]  # Uses NUL bytes as delimiter
         cat_output = sp.run(command, capture_output=True, check=False).stdout.decode().split("\x00")
         str_output = " ".join(cat_output)
@@ -376,7 +376,7 @@ def get_disk_usage(*paths: Path) -> str:
         match = re.search(r"(\d+(\.\d+)?[GKMT])", output)
         if match is None:
             logger.warning("Couldn't parse return from 'du' command: %s", output)
-            return "error parsing disk usage"
+            continue
         disk_usages.append((str(path), match.group(1)))
     if disk_usages:
         return ", ".join(f"{path}: {size}" for path, size in disk_usages)

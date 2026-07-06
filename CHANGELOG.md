@@ -28,10 +28,11 @@ vertical with no changes states `No changes this release.`
   every action it runs (`update-status` excluded). `get-node-info` now reports
   the latest 16 entries, and a new `print-event-log` action dumps the full
   history (up to the most recent 256 entries).
+- Various smaller cleanup items.
 
 ### Proxy
 
-- No changes this release.
+- Various smaller cleanup items.
 
 ## [0.2.1] - 2026-06-09
 

@@ -153,8 +153,8 @@ default → `PROXY_*` env var → flag. The charm delivers these via
 | `--admin-listen` | `PROXY_ADMIN_LISTEN` | `127.0.0.1:8360` | `/healthz`, `/health`, `/metrics` (the charm opens this to `0.0.0.0:8360`). |
 | `--upstream-url` | `PROXY_UPSTREAM_URL` | `http://127.0.0.1:8332` | bitcoind RPC, loopback. |
 | `--upstream-timeout` | `PROXY_UPSTREAM_TIMEOUT` | `30s` | Per-request upstream timeout. |
-| `--upstream-user` | `PROXY_UPSTREAM_USER` | `""` | Health-probe bitcoind auth user (probe only; forwarded requests carry the client's own auth). |
-| `--upstream-password` | `PROXY_UPSTREAM_PASSWORD` | `""` | Health-probe bitcoind auth password. |
+| `--upstream-user` | `PROXY_UPSTREAM_USER` | `""` | bitcoind auth user for the health probe, and the fallback auth injected into forwarded requests that arrive without their own `Authorization` (see Forwarding semantics). |
+| `--upstream-password` | `PROXY_UPSTREAM_PASSWORD` | `""` | bitcoind auth password (see `--upstream-user`). |
 | `--max-body-bytes` | `PROXY_MAX_BODY_BYTES` | `262144` | Request body cap. |
 | `--extend-allowlist` | `PROXY_EXTEND_ALLOWLIST` | `""` | Methods added to the SAFE baseline. |
 | `--filter` | `PROXY_FILTER` | `true` | Enforce the allowlist; `false` forwards every method. |

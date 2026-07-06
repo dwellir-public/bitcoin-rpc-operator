@@ -308,7 +308,7 @@ class BitcoinCharm(ops.CharmBase):
         self._record_event("restart-node")
         self.unit.status = ops.MaintenanceStatus("Restarting node services...")
         utils.stop_service()
-        time.sleep(3)  # Wait for the containers to properly stop
+        time.sleep(3)  # Wait for the service to fully stop
         utils.start_service()
         # The proxy is bitcoind's RPC front door, so the node actions manage it too.
         if utils.rpc_proxy_binary_installed():
