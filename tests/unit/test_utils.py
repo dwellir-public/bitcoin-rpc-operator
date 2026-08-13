@@ -54,14 +54,18 @@ def test_install_dependencies_does_not_use_system_pip():
 
 
 def test_install_bitcoin_delegates_to_verified_release_lifecycle():
+    config = {"rpc-user": "alice", "rpc-password": "secret"}
     with (
         mock.patch("utils.bitcoin.install_release") as install_release,
         mock.patch("utils.chown") as chown,
+        mock.patch("utils.wait_for_running_version", return_value="31.0.0") as wait_ready,
     ):
-        utils.install_bitcoin("31.0")
+        utils.install_bitcoin("31.0", config)
+        assert install_release.call_args.kwargs["wait_for_running_version"]() == "31.0.0"
 
     assert install_release.call_args.args == ("31.0", c.BINARY_PATH, c.CLI_PATH)
-    assert set(install_release.call_args.kwargs) == {"is_running", "stop", "start", "is_healthy"}
+    assert set(install_release.call_args.kwargs) == {"is_running", "stop", "start", "wait_for_running_version"}
+    wait_ready.assert_called_once_with(config)
     chown.assert_called_once()
 
 
@@ -72,7 +76,7 @@ def test_install_bitcoin_is_noop_without_version():
         mock.patch("utils.bitcoin.install_release") as install_release,
         mock.patch("utils.chown") as chown,
     ):
-        utils.install_bitcoin("")
+        utils.install_bitcoin("", {})
     install_release.assert_called_once()
     chown.assert_not_called()
 
@@ -84,9 +88,66 @@ def test_install_bitcoin_failed_download_skips_install():
         mock.patch("utils.chown") as chown,
     ):
         with pytest.raises(ValueError, match="checksum"):
-            utils.install_bitcoin("99.99")
+            utils.install_bitcoin("99.99", {})
 
     chown.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("operation", "command"),
+    [
+        (utils.restart_service, ["systemctl", "restart", c.SERVICE_NAME]),
+        (utils.start_service, ["systemctl", "start", c.SERVICE_NAME]),
+        (utils.stop_service, ["systemctl", "stop", c.SERVICE_NAME]),
+        (utils.restart_monitor, ["systemctl", "restart", c.MONITOR_SERVICE_NAME]),
+        (utils.start_monitor, ["systemctl", "start", c.MONITOR_SERVICE_NAME]),
+        (utils.stop_monitor, ["systemctl", "stop", c.MONITOR_SERVICE_NAME]),
+        (utils.restart_rpc_proxy, ["systemctl", "restart", c.RPC_PROXY_SERVICE_NAME]),
+        (utils.start_rpc_proxy, ["systemctl", "start", c.RPC_PROXY_SERVICE_NAME]),
+        (utils.stop_rpc_proxy, ["systemctl", "stop", c.RPC_PROXY_SERVICE_NAME]),
+    ],
+)
+def test_service_operations_propagate_systemctl_failures(operation, command):
+    with mock.patch("utils.sp.run") as run:
+        operation()
+
+    run.assert_called_once_with(command, check=True)
+
+
+def test_wait_for_running_version_retries_rpc_until_it_reports_subversion():
+    unavailable = mock.MagicMock()
+    unavailable.raise_for_status.side_effect = utils.requests.ConnectionError("not ready")
+    ready = mock.MagicMock()
+    ready.raise_for_status.return_value = None
+    ready.json.return_value = {
+        "jsonrpc": "2.0",
+        "id": "activation",
+        "error": None,
+        "result": {"subversion": "/Satoshi:31.0.0/"},
+    }
+    config = {"rpc-user": "alice", "rpc-password": "secret"}
+
+    with (
+        mock.patch("utils.requests.post", side_effect=[unavailable, ready]) as post,
+        mock.patch("utils.time.sleep") as sleep,
+    ):
+        version = utils.wait_for_running_version(config, attempts=2, interval=0.01)
+
+    assert version == "31.0.0"
+    assert post.call_count == 2
+    sleep.assert_called_once_with(0.01)
+
+
+def test_wait_for_running_version_is_bounded_when_rpc_never_becomes_ready():
+    with (
+        mock.patch("utils.requests.post", side_effect=utils.requests.Timeout("not ready")) as post,
+        mock.patch("utils.time.sleep") as sleep,
+    ):
+        version = utils.wait_for_running_version({}, attempts=3, interval=0.01)
+
+    assert version is None
+    assert post.call_count == 3
+    assert sleep.call_count == 2
 
 
 def test_get_charm_version_prefers_stamped_file(tmp_path, monkeypatch):

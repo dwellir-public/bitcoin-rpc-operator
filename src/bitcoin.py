@@ -64,7 +64,7 @@ def _validate_version(binary_path: Path, expected_version: str) -> None:
     result = sp.run([binary_path, "--version"], capture_output=True, check=True, text=True)
     if _version_parts(result.stdout) != _version_parts(expected_version):
         raise ValueError(
-            f"staged Bitcoin Core version does not match expected {expected_version}: "
+            f"staged {binary_path.name} version does not match expected {expected_version}: "
             f"{result.stdout.splitlines()[0] if result.stdout else 'empty output'}"
         )
 
@@ -76,6 +76,59 @@ def _restore(destinations: dict[Path, Path | None]) -> None:
             os.replace(backup, destination)
 
 
+def _stop_for_activation(stop: Callable[[], None], start: Callable[[], None]) -> None:
+    try:
+        stop()
+    except BaseException as exc:
+        try:
+            start()
+        except BaseException as recovery_exc:
+            raise RuntimeError(f"failed to recover Bitcoin Core after stop failure: {recovery_exc}") from exc
+        raise
+
+
+def _swap_binaries(destinations: dict[Path, Path], stage_dir: Path, backups: dict[Path, Path | None]) -> None:
+    for destination, source in destinations.items():
+        backup = stage_dir / f"{destination.name}.previous" if destination.exists() else None
+        if backup is not None:
+            os.replace(destination, backup)
+        backups[destination] = backup
+        os.replace(source, destination)
+
+
+def _verify_running_version(version: str, wait_for_running_version: Callable[[], str | None]) -> None:
+    running_version = wait_for_running_version()
+    if running_version is None:
+        raise RuntimeError(f"Bitcoin Core {version} did not become RPC-ready")
+    if _version_parts(running_version) != _version_parts(version):
+        raise RuntimeError(f"running Bitcoin Core version does not match expected {version}: {running_version}")
+
+
+def _rollback(
+    backups: dict[Path, Path | None],
+    *,
+    stop_replacement: bool,
+    start_previous: bool,
+    stop: Callable[[], None],
+    start: Callable[[], None],
+    cause: BaseException,
+) -> None:
+    rollback_errors = []
+    operations = []
+    if stop_replacement:
+        operations.append(("stop replacement", stop))
+    operations.append(("restore binaries", lambda: _restore(backups)))
+    if start_previous:
+        operations.append(("start previous version", start))
+    for name, operation in operations:
+        try:
+            operation()
+        except BaseException as rollback_exc:
+            rollback_errors.append(f"{name}: {rollback_exc}")
+    if rollback_errors:
+        raise RuntimeError(f"Bitcoin Core rollback failed ({'; '.join(rollback_errors)})") from cause
+
+
 def _activate(
     version: str,
     destinations: dict[Path, Path],
@@ -84,35 +137,29 @@ def _activate(
     is_running: Callable[[], bool],
     stop: Callable[[], None],
     start: Callable[[], None],
-    is_healthy: Callable[[], bool],
+    wait_for_running_version: Callable[[], str | None],
 ) -> None:
     was_running = is_running()
     if was_running:
-        stop()
+        _stop_for_activation(stop, start)
 
     backups: dict[Path, Path | None] = {}
     activated = False
     try:
-        for destination, source in destinations.items():
-            backup = stage_dir / f"{destination.name}.previous" if destination.exists() else None
-            if backup is not None:
-                os.replace(destination, backup)
-            backups[destination] = backup
-            os.replace(source, destination)
+        _swap_binaries(destinations, stage_dir, backups)
         activated = True
         if was_running:
             start()
-            if not is_healthy():
-                raise RuntimeError(f"Bitcoin Core {version} failed its health check")
-    except BaseException:
-        if activated and was_running:
-            try:
-                stop()
-            except BaseException:
-                pass
-        _restore(backups)
-        if was_running:
-            start()
+            _verify_running_version(version, wait_for_running_version)
+    except BaseException as exc:
+        _rollback(
+            backups,
+            stop_replacement=activated and was_running,
+            start_previous=was_running,
+            stop=stop,
+            start=start,
+            cause=exc,
+        )
         raise
 
 
@@ -124,7 +171,7 @@ def install_release(
     is_running: Callable[[], bool],
     stop: Callable[[], None],
     start: Callable[[], None],
-    is_healthy: Callable[[], bool],
+    wait_for_running_version: Callable[[], str | None],
 ) -> None:
     """Verify, stage, activate, and health-check one Bitcoin Core release.
 
@@ -152,6 +199,7 @@ def install_release(
         archive_path.write_bytes(release.content)
         staged = _extract_binaries(archive_path, stage_dir, version)
         _validate_version(staged[c.BINARY_NAME], version)
+        _validate_version(staged[c.CLI_NAME], version)
 
         destinations = {binary_path: staged[c.BINARY_NAME], cli_path: staged[c.CLI_NAME]}
         _activate(
@@ -161,5 +209,5 @@ def install_release(
             is_running=is_running,
             stop=stop,
             start=start,
-            is_healthy=is_healthy,
+            wait_for_running_version=wait_for_running_version,
         )

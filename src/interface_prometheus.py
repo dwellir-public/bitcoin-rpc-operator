@@ -2,9 +2,12 @@
 """prometheus scrape interface (provides side)."""
 
 import json
+import logging
 from uuid import uuid4
 
 from ops.framework import Object
+
+logger = logging.getLogger(__name__)
 
 
 class PrometheusProvider(Object):
@@ -47,6 +50,7 @@ class PrometheusProvider(Object):
         :param event:
         :return:
         """
+        logger.debug("handling Prometheus relation-joined event")
         ingress_address = event.relation.data.get(self.model.unit)["ingress-address"]
         if "static_configs" not in self.job["job_data"]:
             self.job["job_data"]["static_configs"] = [{"targets": [f"{ingress_address}:{self.job['port']}"]}]

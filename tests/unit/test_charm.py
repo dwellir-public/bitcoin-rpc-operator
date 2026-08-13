@@ -94,7 +94,7 @@ class TestCharm(unittest.TestCase):
 
         self.harness.update_config({"version": "31.0"})
 
-        mock_utils.install_bitcoin.assert_called_once_with("31.0")
+        mock_utils.install_bitcoin.assert_called_once_with("31.0", self.harness.charm.config)
         mock_utils.update_service_args.assert_not_called()
 
     @patch(

@@ -28,6 +28,109 @@ def _responses(payload: bytes):
     return release, sums
 
 
+def _version_output(value: str) -> mock.MagicMock:
+    return mock.MagicMock(stdout=value)
+
+
+def test_install_release_validates_both_staged_binaries_before_stopping(tmp_path):
+    payload = _release("31.0")
+    release, sums = _responses(payload)
+    stop = mock.Mock()
+
+    with (
+        mock.patch("bitcoin.requests.get", side_effect=[release, sums]),
+        mock.patch(
+            "bitcoin.sp.run",
+            side_effect=[
+                _version_output("Bitcoin Core daemon version v31.0.0 bitcoind\n"),
+                _version_output("Bitcoin Core RPC client version v30.0.0 bitcoin-cli\n"),
+            ],
+        ),
+    ):
+        with pytest.raises(ValueError, match="bitcoin-cli.*expected 31.0"):
+            bitcoin.install_release(
+                "31.0",
+                tmp_path / "bitcoind",
+                tmp_path / "bitcoin-cli",
+                is_running=lambda: True,
+                stop=stop,
+                start=mock.Mock(),
+                wait_for_running_version=lambda: "v31.0.0",
+            )
+
+    stop.assert_not_called()
+
+
+def test_install_release_rolls_back_when_running_rpc_version_is_wrong(tmp_path):
+    daemon = tmp_path / "bitcoind"
+    cli = tmp_path / "bitcoin-cli"
+    daemon.write_bytes(b"old-daemon")
+    cli.write_bytes(b"old-cli")
+    payload = _release("31.0")
+    release, sums = _responses(payload)
+    events = []
+
+    with (
+        mock.patch("bitcoin.requests.get", side_effect=[release, sums]),
+        mock.patch(
+            "bitcoin.sp.run",
+            side_effect=[
+                _version_output("Bitcoin Core daemon version v31.0.0 bitcoind\n"),
+                _version_output("Bitcoin Core RPC client version v31.0.0 bitcoin-cli\n"),
+            ],
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="running Bitcoin Core version.*v30.0.0"):
+            bitcoin.install_release(
+                "31.0",
+                daemon,
+                cli,
+                is_running=lambda: events.append("running") or True,
+                stop=lambda: events.append("stop"),
+                start=lambda: events.append("start"),
+                wait_for_running_version=lambda: events.append("ready") or "v30.0.0",
+            )
+
+    assert daemon.read_bytes() == b"old-daemon"
+    assert cli.read_bytes() == b"old-cli"
+    assert events == ["running", "stop", "start", "ready", "stop", "start"]
+
+
+def test_install_release_recovers_old_service_when_initial_stop_fails(tmp_path):
+    daemon = tmp_path / "bitcoind"
+    cli = tmp_path / "bitcoin-cli"
+    daemon.write_bytes(b"old-daemon")
+    cli.write_bytes(b"old-cli")
+    payload = _release("31.0")
+    release, sums = _responses(payload)
+    start = mock.Mock()
+
+    with (
+        mock.patch("bitcoin.requests.get", side_effect=[release, sums]),
+        mock.patch(
+            "bitcoin.sp.run",
+            side_effect=[
+                _version_output("Bitcoin Core daemon version v31.0.0 bitcoind\n"),
+                _version_output("Bitcoin Core RPC client version v31.0.0 bitcoin-cli\n"),
+            ],
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="stop failed"):
+            bitcoin.install_release(
+                "31.0",
+                daemon,
+                cli,
+                is_running=lambda: True,
+                stop=mock.Mock(side_effect=RuntimeError("stop failed")),
+                start=start,
+                wait_for_running_version=lambda: "v31.0.0",
+            )
+
+    assert daemon.read_bytes() == b"old-daemon"
+    assert cli.read_bytes() == b"old-cli"
+    start.assert_called_once()
+
+
 def test_install_release_verifies_checksum_and_version_before_stopping(tmp_path):
     payload = _release("31.0")
     release, sums = _responses(payload)
@@ -47,7 +150,7 @@ def test_install_release_verifies_checksum_and_version_before_stopping(tmp_path)
             is_running=lambda: events.append("running") or True,
             stop=lambda: events.append("stop"),
             start=lambda: events.append("start"),
-            is_healthy=lambda: events.append("healthy") or True,
+            wait_for_running_version=lambda: events.append("healthy") or "v31.0.0",
         )
 
     assert (tmp_path / "bitcoind").read_bytes() == b"new-daemon"
@@ -73,7 +176,7 @@ def test_install_release_checksum_failure_preserves_running_binary(tmp_path):
                 is_running=lambda: True,
                 stop=stop,
                 start=mock.Mock(),
-                is_healthy=lambda: True,
+                wait_for_running_version=lambda: "v31.0.0",
             )
 
     assert daemon.read_bytes() == b"old-daemon"
@@ -102,7 +205,7 @@ def test_install_release_version_failure_preserves_running_binary(tmp_path):
                 is_running=lambda: True,
                 stop=stop,
                 start=mock.Mock(),
-                is_healthy=lambda: True,
+                wait_for_running_version=lambda: "v31.0.0",
             )
 
     assert daemon.read_bytes() == b"old-daemon"
@@ -125,7 +228,7 @@ def test_install_release_rolls_back_both_binaries_when_health_fails(tmp_path):
             return_value=mock.MagicMock(stdout="Bitcoin Core daemon version v31.0.0 bitcoind\n"),
         ),
     ):
-        with pytest.raises(RuntimeError, match="failed its health check"):
+        with pytest.raises(RuntimeError, match="did not become RPC-ready"):
             bitcoin.install_release(
                 "31.0",
                 daemon,
@@ -133,7 +236,7 @@ def test_install_release_rolls_back_both_binaries_when_health_fails(tmp_path):
                 is_running=lambda: events.append("running") or True,
                 stop=lambda: events.append("stop"),
                 start=lambda: events.append("start"),
-                is_healthy=lambda: events.append("healthy") or False,
+                wait_for_running_version=lambda: events.append("healthy") or None,
             )
 
     assert daemon.read_bytes() == b"old-daemon"
@@ -172,7 +275,7 @@ def test_install_release_rolls_back_partial_two_binary_swap(tmp_path):
                 is_running=lambda: events.append("running") or True,
                 stop=lambda: events.append("stop"),
                 start=lambda: events.append("start"),
-                is_healthy=lambda: True,
+                wait_for_running_version=lambda: "v31.0.0",
             )
 
     assert daemon.read_bytes() == b"old-daemon"
@@ -199,7 +302,7 @@ def test_install_release_preserves_stopped_state(tmp_path):
             is_running=lambda: False,
             stop=stop,
             start=start,
-            is_healthy=healthy,
+            wait_for_running_version=healthy,
         )
 
     stop.assert_not_called()
@@ -227,7 +330,7 @@ def test_install_release_requires_both_expected_members(tmp_path):
                 is_running=lambda: False,
                 stop=mock.Mock(),
                 start=mock.Mock(),
-                is_healthy=lambda: True,
+                wait_for_running_version=lambda: "v31.0.0",
             )
 
 
@@ -240,6 +343,6 @@ def test_install_release_is_noop_without_version(tmp_path):
             is_running=lambda: False,
             stop=mock.Mock(),
             start=mock.Mock(),
-            is_healthy=lambda: True,
+            wait_for_running_version=lambda: "v31.0.0",
         )
     get.assert_not_called()

@@ -9,6 +9,7 @@ import shutil
 import subprocess as sp
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import ops
@@ -36,7 +37,7 @@ def create_user():
     chown()
 
 
-def install_bitcoin(version: str):
+def install_bitcoin(version: str, config: Mapping[str, object]):
     """Install the bitcoind daemon and the bitcoin-cli RPC client.
 
     Both binaries come from the same release tarball: bitcoind runs as the node
@@ -53,7 +54,7 @@ def install_bitcoin(version: str):
         is_running=lambda: get_status(c.SERVICE_NAME),
         stop=stop_service,
         start=start_service,
-        is_healthy=lambda: service_running(c.SERVICE_NAME),
+        wait_for_running_version=lambda: wait_for_running_version(config),
     )
     if not version:
         return
@@ -158,47 +159,47 @@ def get_status(service_name: str = c.SERVICE_NAME) -> bool:
 
 def restart_service():
     """Restart the bitcoind service."""
-    sp.run(["systemctl", "restart", c.SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.SERVICE_NAME], check=True)
 
 
 def start_service():
     """Start the bitcoind service."""
-    sp.run(["systemctl", "start", c.SERVICE_NAME])
+    sp.run(["systemctl", "start", c.SERVICE_NAME], check=True)
 
 
 def stop_service():
     """Stop the bitcoind service."""
-    sp.run(["systemctl", "stop", c.SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.SERVICE_NAME], check=True)
 
 
 def restart_monitor():
     """Restart the bitcoind monitor service."""
-    sp.run(["systemctl", "restart", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def start_monitor():
     """Start the bitcoind monitor service."""
-    sp.run(["systemctl", "start", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "start", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def stop_monitor():
     """Stop the bitcoind monitor service."""
-    sp.run(["systemctl", "stop", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def restart_rpc_proxy():
     """Restart the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "restart", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def start_rpc_proxy():
     """Start the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "start", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "start", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def stop_rpc_proxy():
     """Stop the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "stop", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def service_running(service_name: str, iterations: int = 4) -> bool:
@@ -208,6 +209,30 @@ def service_running(service_name: str, iterations: int = 4) -> bool:
             return True
         time.sleep(1)
     return False
+
+
+def wait_for_running_version(config: Mapping[str, object], attempts: int = 30, interval: float = 2.0) -> str | None:
+    """Poll loopback JSON-RPC and return the running client's version."""
+    for attempt in range(attempts):
+        try:
+            response = requests.post(
+                f"http://127.0.0.1:{c.BITCOIND_RPC_PORT}",
+                auth=(str(config.get("rpc-user") or ""), str(config.get("rpc-password") or "")),
+                json={"jsonrpc": "2.0", "id": "activation", "method": "getnetworkinfo", "params": []},
+                timeout=5,
+            )
+            response.raise_for_status()
+            body = response.json()
+            result = body.get("result") if isinstance(body, dict) and not body.get("error") else None
+            subversion = result.get("subversion") if isinstance(result, dict) else None
+            match = re.search(r"Satoshi:([^/]+)/?", str(subversion or ""))
+            if match:
+                return match.group(1)
+        except (requests.RequestException, TypeError, ValueError):
+            logger.debug("Bitcoin Core RPC is not ready during binary activation")
+        if attempt + 1 < attempts:
+            time.sleep(interval)
+    return None
 
 
 def update_service_args(config: ops.ConfigData, restart_service: bool) -> bool:

@@ -5,12 +5,11 @@ import shlex
 from pathlib import Path
 
 import jubilant
-import pytest
 
 APP = "bitcoin-rpc"
 UNIT = f"{APP}/0"
-VERSION = os.getenv("BITCOIN_VERSION", "31.0")
-UPDATED_VERSION = os.getenv("BITCOIN_UPDATED_VERSION", "")
+VERSION = os.environ["BITCOIN_VERSION"]
+UPDATED_VERSION = os.environ["BITCOIN_UPDATED_VERSION"]
 REGTEST_GENESIS = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
 METADATA_PATH = "/tmp/dwellir-metadata-uploader/bitcoin-rpc-0.json"
 
@@ -34,6 +33,13 @@ HTTPServer(('127.0.0.1', 19000), Handler).serve_forever()
 
 def _wait_active(juju: jubilant.Juju, timeout: int = 1800) -> None:
     juju.wait(lambda status: jubilant.all_active(status, APP), timeout=timeout, successes=3)
+
+
+def _wait_status(juju: jubilant.Juju, expected: str, timeout: int = 300):
+    return juju.wait(
+        lambda status: status.apps[APP].units[UNIT].workload_status.current == expected,
+        timeout=timeout,
+    )
 
 
 def _payload(juju: jubilant.Juju, path: str = METADATA_PATH) -> dict:
@@ -97,6 +103,17 @@ def test_regtest_runtime_metadata_and_actions(charm: Path, juju: jubilant.Juju):
     assert juju.run(UNIT, "start-node", wait=300).status == "completed"
     _wait_active(juju)
 
+    before_restart = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+    restarted = juju.run(UNIT, "restart-node", wait=300)
+    assert restarted.status == "completed"
+    _wait_active(juju)
+    after_restart = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+    assert after_restart != before_restart
+
+    readme = juju.run(UNIT, "print-readme", wait=300)
+    assert readme.status == "completed"
+    assert "# Bitcoin" in readme.results["readme"]
+
 
 def test_upgrade_hook_is_metadata_only(charm: Path, juju: jubilant.Juju):
     """Refreshing the same artifact must not replace or restart the workload."""
@@ -139,16 +156,106 @@ def test_metadata_upload_uses_secret_without_leaking_it(juju: jubilant.Juju):
     assert "integration-access-key" not in serialized
     assert "integration-secret-key" not in serialized
     assert "collector-s3-credentials" not in captured["juju_application_config"]
+    juju.config(APP, reset="collector-s3-credentials")
+    _wait_active(juju)
 
 
-@pytest.mark.skipif(not UPDATED_VERSION, reason="BITCOIN_UPDATED_VERSION is not set")
+def test_invalid_secret_blocks_and_recovers_without_stopping_bitcoind(juju: jubilant.Juju):
+    """Invalid credentials must block metadata while preserving the workload."""
+    before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+    secret = juju.add_secret("bitcoin-invalid-metadata", {"invalid": "value"})
+    juju.grant_secret(secret, APP)
+
+    juju.config(APP, {"collector-s3-credentials": str(secret)})
+    blocked = _wait_status(juju, "blocked")
+
+    message = blocked.apps[APP].units[UNIT].workload_status.message
+    assert "invalid collector-s3-credentials" in message
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind").strip() == "active"
+    assert juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip() == before_pid
+
+    juju.config(APP, reset="collector-s3-credentials")
+    _wait_active(juju)
+    assert juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip() == before_pid
+
+
+def test_upload_failure_blocks_and_recovers(juju: jubilant.Juju):
+    """An unreachable S3 endpoint must block, then recover after secret reset."""
+    secret = juju.add_secret(
+        "bitcoin-unreachable-metadata",
+        {
+            "bucket": "test-bucket",
+            "region": "test-region-1",
+            "endpoint-url": "http://127.0.0.1:1",
+            "access-key-id": "unreachable-access-key",
+            "secret-access-key": "unreachable-secret-key",
+        },
+    )
+    juju.grant_secret(secret, APP)
+
+    juju.config(APP, {"collector-s3-credentials": str(secret)})
+    blocked = _wait_status(juju, "blocked")
+
+    assert "metadata upload failed" in blocked.apps[APP].units[UNIT].workload_status.message
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind").strip() == "active"
+
+    juju.config(APP, reset="collector-s3-credentials")
+    _wait_active(juju)
+
+
+def test_local_metadata_write_failure_blocks_and_recovers(juju: jubilant.Juju):
+    """A broken local metadata path must block, then recover after repair."""
+    metadata_dir = "/tmp/dwellir-metadata-uploader"
+    backup_dir = "/tmp/dwellir-metadata-uploader.integration-backup"
+    juju.ssh(
+        UNIT,
+        f"sudo mv {metadata_dir} {backup_dir} && sudo touch {metadata_dir}",
+    )
+
+    juju.config(APP, {"service-args": "-regtest=1 -server=1 -networkactive=0 -txindex=1 -maxconnections=16"})
+    blocked = _wait_status(juju, "blocked")
+
+    assert "metadata collection failed" in blocked.apps[APP].units[UNIT].workload_status.message
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind").strip() == "active"
+
+    juju.ssh(
+        UNIT,
+        f"sudo rm {metadata_dir} && sudo mv {backup_dir} {metadata_dir}",
+    )
+    juju.config(APP, {"service-args": "-regtest=1 -server=1 -networkactive=0 -txindex=1"})
+    _wait_active(juju)
+
+
+def test_running_release_replacement_verifies_rpc_and_versions(juju: jubilant.Juju):
+    """A running replacement must expose the requested version through RPC."""
+    before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+
+    juju.config(APP, {"version": UPDATED_VERSION})
+    _wait_active(juju)
+
+    after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+    assert after_pid != before_pid
+    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")
+    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoin-cli --version")
+    network = json.loads(
+        juju.ssh(
+            UNIT,
+            "/home/bitcoin/bitcoin-cli -regtest -rpcuser=integration-user "
+            "-rpcpassword=integration-password getnetworkinfo",
+        )
+    )
+    assert UPDATED_VERSION in network["subversion"]
+    assert _payload(juju)["blockchain"]["client_version"].startswith(UPDATED_VERSION)
+
+
 def test_release_replacement_preserves_stopped_state(juju: jubilant.Juju):
     """A validated version replacement must not start an operator-stopped node."""
     juju.run(UNIT, "stop-node", wait=300)
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
 
-    juju.config(APP, {"version": UPDATED_VERSION})
+    juju.config(APP, {"version": VERSION})
     juju.wait(lambda status: APP in status.apps, timeout=1800)
 
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
-    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")
+    assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")
+    assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoin-cli --version")

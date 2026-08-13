@@ -140,6 +140,7 @@ class BitcoinCharm(ops.CharmBase):
         restarting inline; a single update_service_args at the end applies them, so
         changing several options in one event costs one restart, not several.
         """
+        logger.debug("handling config-changed event")
         summary = self._config_change_summary()
         self._record_event(f"config-changed  {summary}" if summary else "config-changed")
         restart_bitcoind = False
@@ -169,7 +170,7 @@ class BitcoinCharm(ops.CharmBase):
             restart_bitcoind = True
 
         if self._stored.version != self.config.get("version"):
-            utils.install_bitcoin(str(self.config.get("version") or ""))
+            utils.install_bitcoin(str(self.config.get("version") or ""), self.config)
             self._stored.version = self.config.get("version")
 
         # Refresh the proxy (binary/unit/env, start or stop) before re-rendering
@@ -197,6 +198,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_install(self, event):
         """Handle install."""
+        logger.debug("handling install event")
         self._record_event("install")
         utils.create_user()
         utils.install_dependencies()
@@ -209,7 +211,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _install_bitcoind(self, restart_service: bool = False):
         """Install the bitcoind client and service."""
-        utils.install_bitcoin(str(self.config.get("version") or ""))
+        utils.install_bitcoin(str(self.config.get("version") or ""), self.config)
         utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
         utils.update_service_args(self.config, restart_service=restart_service)
 
@@ -236,6 +238,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_start(self, event):
         """Handle start."""
+        logger.debug("handling start event")
         self._record_event("start")
         utils.start_service()
         utils.start_monitor()
@@ -245,6 +248,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_stop(self, event):
         """Handle stop."""
+        logger.debug("handling stop event")
         self._record_event("stop")
         utils.stop_service()
         utils.stop_monitor()
@@ -253,6 +257,7 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_update_status(self, event):
         """Handle update status."""
+        logger.debug("handling update-status event")
         self._update_status()
 
     def _update_status(self):
@@ -296,11 +301,13 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_get_node_help_action(self, event: ops.ActionEvent) -> None:
+        logger.debug("handling get-node-help action")
         self._record_event("get-node-help")
         event.set_results(results={"help-output": utils.get_client_help_output()})
 
     def _on_get_node_info_action(self, event: ops.ActionEvent) -> None:
         """Provide information about the node to the action's results."""
+        logger.debug("handling get-node-info action")
         self._record_event("get-node-info")
         # Charm
         event.set_results(results={"charm-version": utils.get_charm_version()})
@@ -329,15 +336,18 @@ class BitcoinCharm(ops.CharmBase):
 
     def _on_print_event_log_action(self, event: ops.ActionEvent) -> None:
         """Print the full recorded event log to the action's results."""
+        logger.debug("handling print-event-log action")
         self._record_event("print-event-log")
         event.set_results(results={"event-log": "\n".join(self._stored.event_log)})
 
     def _on_print_readme_action(self, event: ops.ActionEvent) -> None:
         """Print the README.md file to the action's results."""
+        logger.debug("handling print-readme action")
         self._record_event("print-readme")
         event.set_results(results={"readme": utils.get_readme()})
 
     def _on_restart_node_action(self, event: ops.ActionEvent) -> None:
+        logger.debug("handling restart-node action")
         self._record_event("restart-node")
         self.unit.status = ops.MaintenanceStatus("Restarting node services...")
         utils.stop_service()
@@ -349,6 +359,7 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_start_node_action(self, event: ops.ActionEvent) -> None:
+        logger.debug("handling start-node action")
         self._record_event("start-node")
         self.unit.status = ops.MaintenanceStatus("Starting node services...")
         utils.start_service()
@@ -358,6 +369,7 @@ class BitcoinCharm(ops.CharmBase):
         self._update_status()
 
     def _on_stop_node_action(self, event: ops.ActionEvent) -> None:
+        logger.debug("handling stop-node action")
         self._record_event("stop-node")
         self.unit.status = ops.MaintenanceStatus("Stopping node services...")
         utils.stop_monitor()

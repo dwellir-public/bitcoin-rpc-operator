@@ -7,6 +7,8 @@ It does not rebuild the charm during release.
 
 Run `Charm Integration` from the repository `main` branch.
 Provide the full commit SHA in `source_sha`.
+Provide two distinct Bitcoin Core releases in `bitcoin_version` and
+`bitcoin_updated_version`.
 
 The workflow performs these steps:
 
@@ -32,6 +34,7 @@ The workflow enforces these gates:
 
 - the repository and workflow branch are canonical;
 - the source commit belongs to `main`;
+- the integration run completed successfully on `main` for the exact source SHA;
 - source tests pass again at that commit;
 - the downloaded artifact name includes the commit;
 - the artifact digest matches the operator-provided digest;
@@ -39,7 +42,8 @@ The workflow enforces these gates:
 
 The workflow uploads the existing artifact once.
 It releases that exact Charmhub revision to the selected channel.
-It then verifies the published revision in Charmhub status.
+It parses Charmhub status JSON.
+The check binds the revision to the selected channel and Ubuntu 24.04 AMD64 base.
 
 The workflow also creates a GitHub provenance release.
 That release records the source SHA and artifact digest.

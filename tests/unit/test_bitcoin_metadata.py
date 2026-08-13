@@ -44,6 +44,56 @@ def test_model_view_recursively_redacts_config_and_relation_values():
     assert "-txindex=1" in view.config["service-args"]
 
 
+def test_recursive_redaction_covers_api_and_access_key_variants_in_sequences():
+    secrets = {
+        "api-key": "api-hyphen-secret",
+        "x_api_key": "x-api-secret",
+        "API_KEY": "api-env-secret",
+        "AWS_ACCESS_KEY_ID": "aws-access-secret",
+        "access.key": "access-dot-secret",
+    }
+    value = {
+        "entries": [
+            secrets,
+            ("safe", {"nested-access_key": "nested-access-secret"}),
+        ]
+    }
+
+    redacted = metadata._redact_value(value)
+
+    serialized = repr(redacted)
+    for secret in (*secrets.values(), "nested-access-secret"):
+        assert secret not in serialized
+    assert redacted["entries"][0] == dict.fromkeys(secrets, "REDACTED")
+
+
+def test_runtime_redaction_covers_env_flags_headers_and_url_queries():
+    value = (
+        "API_KEY=api-env-secret X_API_KEY='x-api-secret' "
+        "AWS_ACCESS_KEY_ID=aws-access-secret access_key=access-secret "
+        "--api-key=api-flag-secret --x-api-key x-api-flag-secret "
+        "x-api-key: header-secret "
+        "https://rpc.example/path?api_key=query-secret&safe=visible&access-key=access-query-secret"
+    )
+
+    redacted = metadata.redact_runtime_value(value)
+
+    for secret in (
+        "api-env-secret",
+        "x-api-secret",
+        "aws-access-secret",
+        "access-secret",
+        "api-flag-secret",
+        "x-api-flag-secret",
+        "header-secret",
+        "query-secret",
+        "access-query-secret",
+    ):
+        assert secret not in redacted
+    assert "https://rpc.example/path?api_key=REDACTED" in redacted
+    assert "safe=visible" in redacted
+
+
 def test_build_runtime_metadata_uses_rpc_identity_and_effective_process_flags(monkeypatch):
     responses = {
         "getnetworkinfo": {"subversion": "/Satoshi:31.1.0/", "protocolversion": 70016},

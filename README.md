@@ -278,11 +278,15 @@ The integration suite requires an exact built artifact and a disposable controll
 It creates and destroys a temporary model through Jubilant.
 
 ```bash
-CHARM_PATH="$PWD/bitcoin-rpc_ubuntu@24.04-amd64.charm" make integration-test
+CHARM_PATH="$PWD/bitcoin-rpc_ubuntu@24.04-amd64.charm" \
+BITCOIN_VERSION=30.2 \
+BITCOIN_UPDATED_VERSION=31.0 \
+make integration-test
 ```
 
 The suite runs Bitcoin Core in deterministic regtest mode.
-It tests metadata, redaction, S3 upload, actions, and metadata-only refresh.
+It requires two distinct Bitcoin Core releases.
+It tests metadata, redaction, failure recovery, binary replacement, actions, and metadata-only refresh.
 Production models are outside this test path.
 See [the release process](./docs/release.md) before publishing.
 

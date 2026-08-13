@@ -19,6 +19,7 @@ import utils
 
 _SENSITIVE_KEY_PARTS = {
     "accesskey",
+    "apikey",
     "authorization",
     "cookie",
     "credential",
@@ -57,18 +58,36 @@ def redact_runtime_value(value: str) -> str:
         r"\1REDACTED",
         redacted,
     )
+    value_pattern = r'(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|[^\s,;}&#]+)'
+
+    def redact_flag(match: re.Match[str]) -> str:
+        if _key_is_sensitive(match.group(2)):
+            return f"{match.group(1)}{match.group(2)}{match.group(3)}REDACTED"
+        return match.group(0)
+
     redacted = re.sub(
-        r"(?i)(\b[A-Z0-9_.-]*(?:PASSWORD|SECRET|TOKEN|CREDENTIAL|COOKIE|RPCAUTH|RPCUSER|PRIVATE_KEY)[A-Z0-9_.-]*)(=)([^\s]+)",
-        r"\1\2REDACTED",
+        rf"(?i)(?<![a-z0-9_.-])(--?)([a-z0-9_.-]+)(=|\s+)({value_pattern})",
+        redact_flag,
+        redacted,
+    )
+
+    def redact_query(match: re.Match[str]) -> str:
+        if _key_is_sensitive(match.group(2)):
+            return f"{match.group(1)}{match.group(2)}{match.group(3)}REDACTED"
+        return match.group(0)
+
+    redacted = re.sub(r"(?i)([?&])([a-z0-9_.-]+)(=)([^&#\s]*)", redact_query, redacted)
+
+    def redact_assignment(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{match.group(2)}REDACTED" if _key_is_sensitive(match.group(1)) else match.group(0)
+
+    redacted = re.sub(
+        rf"(?i)(?<![a-z0-9_.-])([a-z][a-z0-9_.-]*)(\s*[:=]\s*)({value_pattern})",
+        redact_assignment,
         redacted,
     )
     redacted = re.sub(
-        r"(?i)(--?[a-z0-9_.-]*(?:password|secret|token|credential|cookie|rpcauth|rpcuser|privatekey)[a-z0-9_.-]*)(=|\s+)(?:\"[^\"]*\"|'[^']*'|[^\s]+)",
-        r"\1\2REDACTED",
-        redacted,
-    )
-    redacted = re.sub(
-        r"(?i)(\b(?:password|secret|token|credential|cookie|rpcauth|rpcuser|private key)\b\s*[:=]?\s+)([^\s,;}]+)",
+        r"(?i)((?<![a-z0-9_.-])\b(?:password|secret|token|credential|cookie|rpcauth|rpcuser|private key)\b\s*[:=]?\s+)([^\s,;}]+)",
         r"\1REDACTED",
         redacted,
     )
