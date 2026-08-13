@@ -14,6 +14,7 @@ import time
 
 import ops
 
+import bitcoin_metadata
 import constants as c
 import utils
 from interface_prometheus import PrometheusProvider
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 _EVENT_LOG_MAX = 256
 
 # Config keys whose value must never be echoed into the event log.
-_SENSITIVE_CONFIG = {"rpc-password"}
+_SENSITIVE_CONFIG = {"rpc-password", "rpc-user"}
 
 # (config-key, stored-attr) pairs the charm diffs on config-changed. Kept in sync
 # with the per-key comparisons in _on_config_changed so the recorded summary
@@ -128,7 +129,8 @@ class BitcoinCharm(ops.CharmBase):
             new = self.config.get(key)
             if getattr(self._stored, attr) == new:
                 continue
-            changes.append(f"{key}=<redacted>" if key in _SENSITIVE_CONFIG else f"{key}={new}")
+            value = "<redacted>" if key in _SENSITIVE_CONFIG else bitcoin_metadata.redact_runtime_value(str(new))
+            changes.append(f"{key}={value}")
         return ", ".join(changes)
 
     def _on_config_changed(self, event: ops.ConfigChangedEvent):
@@ -167,12 +169,8 @@ class BitcoinCharm(ops.CharmBase):
             restart_bitcoind = True
 
         if self._stored.version != self.config.get("version"):
-            # Stop first so the running binary can be replaced (ETXTBSY otherwise);
-            # the final update_service_args restarts into the new binary + args.
-            utils.stop_service()
             utils.install_bitcoin(str(self.config.get("version") or ""))
             self._stored.version = self.config.get("version")
-            restart_bitcoind = True
 
         # Refresh the proxy (binary/unit/env, start or stop) before re-rendering
         # bitcoind's args, so the loopback pin only engages once the binary exists.
@@ -283,41 +281,18 @@ class BitcoinCharm(ops.CharmBase):
         ]
         msg = ", ".join(parts)
         if all(statuses):
+            metadata_error = bitcoin_metadata.collect_upload_metadata(self)
+            if metadata_error:
+                self.unit.status = ops.BlockedStatus(metadata_error)
+                return
             self.unit.status = ops.ActiveStatus(msg)
             return
         self.unit.status = ops.WaitingStatus(msg)
 
     def _on_upgrade_charm(self, event):
-        """Handle upgrade charm event."""
-        # The upgrade-charm hook runs the new charm code from the new charm dir, so
-        # get_charm_version() here is the version being upgraded to.
+        """Collect metadata without changing workload files or service state."""
+        logger.debug("handling upgrade-charm event")
         self._record_event(f"upgrade-charm  {utils.get_charm_version()}")
-        # Re-apply charm logic (unit files, env, args) to the existing host. The
-        # bitcoind and proxy binaries are version-driven (config) and handled in
-        # _on_config_changed, so neither is re-downloaded here; upgrade should not
-        # change the running versions.
-        #
-        # install_dependencies re-runs the pinned monitor venv install, so a
-        # revision that bumps PIP_PACKAGES (or migrates a unit off a pre-venv
-        # revision) lands the new deps; the monitor is restarted below to pick
-        # them up. The venv is reused in place, not torn down, so the running
-        # monitor keeps serving until the explicit restart.
-        utils.install_dependencies()
-        unit_changed = utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
-        self._install_bitcoind_monitor()
-        utils.install_rpc_proxy_service(self.config, restart_service=False)
-        utils.chown()
-        if utils.service_running(c.MONITOR_SERVICE_NAME):
-            utils.restart_monitor()
-        # Re-render bitcoind's args in place (no restart here) so loopback-pin / wallet
-        # hardening reaches units upgraded from a pre-hardening revision. Restart
-        # bitcoind only if something it actually consumes changed -- its unit file or
-        # its rendered args -- so a no-op charm upgrade doesn't bounce a running node.
-        args_changed = utils.update_service_args(self.config, restart_service=False)
-        if (unit_changed or args_changed) and utils.service_running(c.SERVICE_NAME):
-            utils.restart_service()
-        if utils.rpc_proxy_binary_installed():
-            utils.restart_rpc_proxy()
         self._update_status()
 
     def _on_get_node_help_action(self, event: ops.ActionEvent) -> None:
@@ -334,17 +309,19 @@ class BitcoinCharm(ops.CharmBase):
         event.set_results(results={"disk-usage": disk_usage})
         # Client
         event.set_results(results={"client-version": utils.get_version()})
-        event.set_results(results={"client-service-args": utils.get_service_args()})
+        event.set_results(
+            results={"client-service-args": bitcoin_metadata.redact_runtime_value(utils.get_service_args())}
+        )
         proc_cmdline = utils.get_client_proc_cmdline()
         if proc_cmdline:
-            event.set_results(results={"client-proc-cmdline": proc_cmdline})
+            event.set_results(results={"client-proc-cmdline": bitcoin_metadata.redact_runtime_value(proc_cmdline)})
         else:
             event.set_results(results={"client-proc-cmdline": "process not found"})
         # RPC proxy
         event.set_results(results={"rpc-proxy-installed": utils.rpc_proxy_binary_installed()})
         event.set_results(results={"rpc-proxy-version": utils.get_rpc_proxy_version()})
         event.set_results(results={"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
-        event.set_results(results={"rpc-proxy-env": utils.get_rpc_proxy_env()})
+        event.set_results(results={"rpc-proxy-env": bitcoin_metadata.redact_runtime_value(utils.get_rpc_proxy_env())})
         # Event log (latest 16 to keep the combined output readable, with each
         # entry's detail truncated; use print-event-log for the full history).
         recent = [_truncate_event_detail(line) for line in list(self._stored.event_log)[-16:]]

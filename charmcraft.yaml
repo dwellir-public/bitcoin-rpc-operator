@@ -29,7 +29,9 @@ platforms:
 parts:
   bitcoin-rpc-charm:
     source: .
-    plugin: charm
+    plugin: uv
+    build-snaps:
+      - astral-uv
     build-packages:
       - git
     # Stamp the charm's release tag + commit into a `charm_version` file that
@@ -40,6 +42,13 @@ parts:
       git -C "$CRAFT_PART_SRC" describe --tags --always 2>/dev/null \
         > "$CRAFT_PART_INSTALL/charm_version" \
         || cat "$CRAFT_PART_SRC/VERSION" > "$CRAFT_PART_INSTALL/charm_version"
+  root-files:
+    plugin: dump
+    source: .
+    stage:
+      - README.md
+      - VERSION
+      - templates/**
 
 provides:
   node-prometheus:
@@ -75,6 +84,13 @@ config:
       type: string
       description: |
         The version of the Bitcoin client to install.
+      default: ""
+    collector-s3-credentials:
+      type: secret
+      description: |
+        Juju secret reference for the S3-compatible Hedgehog metadata target.
+        The secret must contain bucket, region, access-key-id, and secret-access-key.
+        endpoint-url, key-prefix, and session-token are optional.
       default: ""
     rpc-proxy-filter:
       type: boolean

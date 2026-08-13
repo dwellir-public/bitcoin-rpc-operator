@@ -40,7 +40,30 @@ NOTE: do not pass `-rpcbind`, `-rpcallowip` or `-rpcport` in `service-args` — 
 
 - The `version` config is **required** and has no default. Without it the Bitcoin client is not installed and the unit stays blocked. Pick any released version from the [Bitcoin client index](https://bitcoincore.org/bin/), e.g. `--config version=31.0` as above.
 - The `rpc-proxy-version` config defaults to a published release of this repository. The matching `v<version>` release with a `bitcoin-rpc-proxy` asset must exist on this repository's GitHub releases page, or the unit goes into `BlockedStatus` with `bitcoind` left loopback-only (see [RPC proxy](#rpc-proxy)).
+- The charm validates each Bitcoin Core archive against the release `SHA256SUMS` file. It also validates the staged binary version before activation.
 - Setting `-txindex=1` is optional, but recommended for full transaction indexing. This equals "archive mode" for other blockchains. If this is not set from deploy, one might need to run a reindex operation to make sure all transactions are indexed.
+
+### Hedgehog metadata
+
+The charm writes metadata to `/tmp/dwellir-metadata-uploader/<unit>.json`.
+It uploads the same payload when `collector-s3-credentials` is set.
+The setting accepts a Juju secret reference only.
+
+```bash
+secret_id=$(juju add-secret bitcoin-metadata \
+  bucket=<bucket> \
+  region=<region> \
+  endpoint-url=<optional-s3-endpoint> \
+  key-prefix=uploads/ \
+  access-key-id=<access-key> \
+  secret-access-key=<secret-key>)
+juju grant-secret "$secret_id" bitcoin-rpc
+juju config bitcoin-rpc collector-s3-credentials="$secret_id"
+```
+
+Never store collector keys in charm config or source files.
+The payload excludes collector credentials and redacts runtime credentials.
+See [metadata fields and verification](./docs/metadata.md).
 
 #### Pruning Level
 
@@ -129,6 +152,11 @@ Upgrading the Bitcoin client is as easy as setting the `version` config to any r
 ```bash
 juju config bitcoin-rpc version=31.0
 ```
+
+The charm stages and validates both binaries before service interruption.
+It restores the previous binaries when activation fails.
+An operator-stopped service remains stopped after replacement.
+The `upgrade-charm` hook only collects metadata and updates status.
 
 #### On the unit
 
@@ -238,17 +266,25 @@ Tracked events: `install`, `config-changed`, `upgrade-charm`, `start`, `stop`, a
 
 ## Development
 
-The charm's lint, type and test suites are driven by [tox](https://tox.wiki/):
+Install [uv](https://docs.astral.sh/uv/) and Charmcraft.
+The repository lock file defines Python dependencies.
 
 ```bash
-tox -e format      # ruff format + autofix
-tox -e lint        # codespell + ruff checks
-tox -e static      # pyright type checks
-tox -e unit        # unit tests with coverage
-tox -e integration # integration tests; needs a live Juju controller (e.g. local LXD)
+make charm-test
+make build-charm CHARMCRAFT_ARGS='--platform=ubuntu@24.04:amd64'
 ```
 
-CI runs `lint`, `static` and `unit` on every PR. The integration suite builds and deploys the charm for real, so it is not part of the PR lane; run it manually against a bootstrapped controller.
+The integration suite requires an exact built artifact and a disposable controller.
+It creates and destroys a temporary model through Jubilant.
+
+```bash
+CHARM_PATH="$PWD/bitcoin-rpc_ubuntu@24.04-amd64.charm" make integration-test
+```
+
+The suite runs Bitcoin Core in deterministic regtest mode.
+It tests metadata, redaction, S3 upload, actions, and metadata-only refresh.
+Production models are outside this test path.
+See [the release process](./docs/release.md) before publishing.
 
 The bundled Go RPC proxy is a separate lane: see [bitcoin-rpc-proxy/README.md](./bitcoin-rpc-proxy/README.md) and its Makefile.
 

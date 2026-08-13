@@ -1,19 +1,56 @@
+[project]
+name = "bitcoin-rpc-operator"
+version = "0.4.0"
+description = "Juju machine charm for Bitcoin Core RPC nodes."
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.42.13",
+    "charms-dwellir-blockchain-common==0.2.4",
+    "ops>=3,<4",
+    "requests>=2,<3",
+]
+
+[dependency-groups]
+dev = [
+    "tox>=4.0.0",
+    "tox-uv>=1.29.0",
+]
+lint = [
+    "codespell",
+    "pyright",
+    "ruff",
+]
+unit = [
+    "coverage[toml]",
+    "ops[testing]",
+    "pytest",
+]
+integration = [
+    "jubilant",
+    "pytest",
+]
+
 # Testing tools configuration
 [tool.coverage.run]
 branch = true
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 55
 
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
+filterwarnings = ["ignore::PendingDeprecationWarning"]
 
 # Linting tools configuration
 [tool.ruff]
 line-length = 120
-lint.select = ["E", "W", "F", "C", "N", "D", "I001"]
-lint.extend-ignore = [
+extend-exclude = ["__pycache__", "*.egg_info"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "C", "N", "D", "I001"]
+extend-ignore = [
     "D105",
     "D107",
     "D203",
@@ -28,9 +65,8 @@ lint.extend-ignore = [
     "D409",
     "D413",
 ]
-lint.ignore = ["E501"]
-extend-exclude = ["__pycache__", "*.egg_info", "templates"]
-lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
+ignore = ["E501"]
+per-file-ignores = {"src/interface_prometheus.py" = ["D205"], "tests/*" = ["D100","D101","D102","D103","D104"]}
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -41,4 +77,3 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage,bitc
 
 [tool.pyright]
 include = ["src", "tests"]
-

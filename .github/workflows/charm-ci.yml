@@ -14,43 +14,20 @@ on:
       - '.github/workflows/rpc-proxy-*.yml'
 
 jobs:
-  lint:
+  charm-tests:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e lint
-
-  static:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e static
-
-  unit-tests:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e unit
+      - uses: astral-sh/setup-uv@v6
+      - run: make charm-test
 
   summary:
     name: CI Summary
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [lint, static, unit-tests]
+    needs: [charm-tests]
     if: always() # Always run, even if earlier jobs fail
     steps:
       - name: Write CI summary
@@ -58,9 +35,7 @@ jobs:
           {
             echo "## Charm CI Summary"
             echo ""
-            echo "- **Lint:**   ${{ needs.lint.result }}"
-            echo "- **Static:** ${{ needs.static.result }}"
-            echo "- **Unit:**   ${{ needs.unit-tests.result }}"
+            echo "- **Charm tests:** ${{ needs.charm-tests.result }}"
             echo ""
             echo "### Commit"
             echo "[${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"

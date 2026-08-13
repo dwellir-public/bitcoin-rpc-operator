@@ -1,68 +1,154 @@
-#!/usr/bin/env python3
-# Copyright 2024-2026 Dwellir
-# See LICENSE file for licensing details.
-
-import logging
+import base64
+import json
+import os
+import shlex
 from pathlib import Path
 
+import jubilant
 import pytest
-import yaml
-from pytest_operator.plugin import OpsTest  # pyright: ignore[reportMissingImports]
 
-logger = logging.getLogger(__name__)
+APP = "bitcoin-rpc"
+UNIT = f"{APP}/0"
+VERSION = os.getenv("BITCOIN_VERSION", "31.0")
+UPDATED_VERSION = os.getenv("BITCOIN_UPDATED_VERSION", "")
+REGTEST_GENESIS = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
+METADATA_PATH = "/tmp/dwellir-metadata-uploader/bitcoin-rpc-0.json"
 
-METADATA = yaml.safe_load(Path("./charmcraft.yaml").read_text())
-APP_NAME = METADATA["name"]
-BITCOIN_VERSION = "31.0"
+S3_CAPTURE_SERVER = b"""\
+import pathlib
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_PUT(self):
+        size = int(self.headers.get('content-length', '0'))
+        pathlib.Path('/tmp/bitcoin-metadata-s3.json').write_bytes(self.rfile.read(size))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *_args):
+        pass
+
+HTTPServer(('127.0.0.1', 19000), Handler).serve_forever()
+"""
 
 
-@pytest.mark.abort_on_fail
-async def test_deploy_blocks_without_version(ops_test: OpsTest):
-    """Build and deploy the charm; without `version` set, the unit must block.
-
-    Covers charm packaging and the install hook (apt/pip dependencies, service
-    units) without downloading Bitcoin Core.
-    """
-    charm = await ops_test.build_charm(".")
-    await ops_test.model.deploy(charm, application_name=APP_NAME)
-    await ops_test.model.wait_for_idle(apps=[APP_NAME], status="blocked", timeout=600)
-    unit = ops_test.model.applications[APP_NAME].units[0]
-    assert unit.workload_status_message == "bitcoind not installed; set version"
+def _wait_active(juju: jubilant.Juju, timeout: int = 1800) -> None:
+    juju.wait(lambda status: jubilant.all_active(status, APP), timeout=timeout, successes=3)
 
 
-@pytest.mark.abort_on_fail
-async def test_version_config_activates_node(ops_test: OpsTest):
-    """Setting `version` installs bitcoind and brings node, monitor and proxy up.
+def _payload(juju: jubilant.Juju, path: str = METADATA_PATH) -> dict:
+    return json.loads(juju.ssh(UNIT, f"sudo cat {shlex.quote(path)}"))
 
-    Covers the two release risk areas: the binary download/extraction path
-    (utils.install_bitcoin) and service-arg handling (utils.update_service_args).
-    """
-    await ops_test.model.applications[APP_NAME].set_config(
-        {
-            "version": BITCOIN_VERSION,
-            "rpc-user": "test",
-            "rpc-password": "test",
-            # -networkactive=0: RPC serves right after start, with no P2P
-            # traffic or initial block download on the test machine.
-            "service-args": "-chain=main -server=1 -networkactive=0",
-        }
+
+def test_regtest_runtime_metadata_and_actions(charm: Path, juju: jubilant.Juju):
+    """Validate identity, effective settings, indexes, resources, and safe actions."""
+    juju.deploy(
+        charm,
+        app=APP,
+        base="ubuntu@24.04",
+        config={
+            "version": VERSION,
+            "rpc-user": "integration-user",
+            "rpc-password": "integration-password",
+            "service-args": (
+                "-regtest=1 -server=1 -networkactive=0 -txindex=1 "
+                "-blockfilterindex=1 -zmqpubrawblock=tcp://127.0.0.1:28332"
+            ),
+        },
     )
-    # The config-changed hook downloads and extracts the Bitcoin Core release
-    # inline (~50 MB), so allow generously for slow networks.
-    await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1800)
-    unit = ops_test.model.applications[APP_NAME].units[0]
-    assert unit.workload_status_message == "Node: up, monitor: up, proxy: up"
+    _wait_active(juju)
+
+    payload = _payload(juju)
+    assert payload["blockchain"]["blockchain_ecosystem"] == "bitcoin"
+    assert payload["blockchain"]["blockchain_network_name"] == "Bitcoin regtest"
+    assert payload["blockchain"]["client_name"] == "bitcoin-core"
+    assert payload["blockchain"]["client_version"].startswith(VERSION)
+    assert payload["blockchain"]["binary_path"] == "/home/bitcoin/bitcoind"
+    assert payload["blockchain"]["genesis_hash"] == REGTEST_GENESIS
+    assert "integration-password" not in json.dumps(payload)
+    bitcoin = payload["bitcoin"]
+    assert bitcoin["chain"] == "regtest"
+    assert bitcoin["network_magic"] == "fabfb5da"
+    assert bitcoin["effective_flags"]["txindex"] == "1"
+    assert bitcoin["effective_flags"]["blockfilterindex"] == "1"
+    assert "rpcpassword" not in bitcoin["effective_flags"]
+    assert bitcoin["ports"] == {
+        "p2p": 18444,
+        "rpc_internal": 8332,
+        "rpc_proxy": 8331,
+        "zmq": [28332],
+    }
+    assert bitcoin["pruning"]["enabled"] is False
+    assert "txindex" in bitcoin["indexes"]
+    assert set(payload["resource_limits"]) == {
+        "memory_max_bytes",
+        "memory_high_bytes",
+        "cpu_quota_percent",
+        "tasks_max",
+    }
+
+    info = juju.run(UNIT, "get-node-info", wait=300)
+    assert info.status == "completed"
+    assert "integration-password" not in json.dumps(info.results)
+    assert info.results["rpc-proxy-running"] is True
+
+    assert juju.run(UNIT, "stop-node", wait=300).status == "completed"
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
+    assert juju.run(UNIT, "start-node", wait=300).status == "completed"
+    _wait_active(juju)
 
 
-async def test_get_node_info_action(ops_test: OpsTest):
-    """get-node-info reports the installed version, running process, and hardened args."""
-    unit = ops_test.model.applications[APP_NAME].units[0]
-    action = await unit.run_action("get-node-info")
-    action = await action.wait()
-    assert action.status == "completed"
-    results = action.results
-    assert BITCOIN_VERSION in results["client-version"]
-    assert results["client-proc-cmdline"] != "process not found"
-    # harden_service_args must have pinned bitcoind's RPC to loopback.
-    assert "-rpcbind=127.0.0.1" in results["client-service-args"]
-    assert str(results["rpc-proxy-installed"]) == "True"
+def test_upgrade_hook_is_metadata_only(charm: Path, juju: jubilant.Juju):
+    """Refreshing the same artifact must not replace or restart the workload."""
+    before_hash = juju.ssh(UNIT, "sha256sum /home/bitcoin/bitcoind").split()[0]
+    before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+
+    juju.refresh(APP, path=charm)
+    _wait_active(juju)
+
+    after_hash = juju.ssh(UNIT, "sha256sum /home/bitcoin/bitcoind").split()[0]
+    after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
+    assert after_hash == before_hash
+    assert after_pid == before_pid
+    assert _payload(juju)["blockchain"]["genesis_hash"] == REGTEST_GENESIS
+
+
+def test_metadata_upload_uses_secret_without_leaking_it(juju: jubilant.Juju):
+    """Upload one payload to a disposable loopback S3-compatible capture server."""
+    encoded = base64.b64encode(S3_CAPTURE_SERVER).decode()
+    juju.ssh(UNIT, f"echo {shlex.quote(encoded)} | base64 -d | sudo tee /tmp/s3-capture.py >/dev/null")
+    juju.ssh(UNIT, "sudo systemd-run --unit=bitcoin-metadata-s3 python3 /tmp/s3-capture.py")
+    secret = juju.add_secret(
+        "bitcoin-metadata-integration",
+        {
+            "bucket": "test-bucket",
+            "region": "test-region-1",
+            "endpoint-url": "http://127.0.0.1:19000",
+            "key-prefix": "integration/",
+            "access-key-id": "integration-access-key",
+            "secret-access-key": "integration-secret-key",
+        },
+    )
+    juju.grant_secret(secret, APP)
+    juju.config(APP, {"collector-s3-credentials": str(secret)})
+    _wait_active(juju)
+
+    captured = _payload(juju, "/tmp/bitcoin-metadata-s3.json")
+    serialized = json.dumps(captured)
+    assert captured["blockchain"]["genesis_hash"] == REGTEST_GENESIS
+    assert "integration-access-key" not in serialized
+    assert "integration-secret-key" not in serialized
+    assert "collector-s3-credentials" not in captured["juju_application_config"]
+
+
+@pytest.mark.skipif(not UPDATED_VERSION, reason="BITCOIN_UPDATED_VERSION is not set")
+def test_release_replacement_preserves_stopped_state(juju: jubilant.Juju):
+    """A validated version replacement must not start an operator-stopped node."""
+    juju.run(UNIT, "stop-node", wait=300)
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
+
+    juju.config(APP, {"version": UPDATED_VERSION})
+    juju.wait(lambda status: APP in status.apps, timeout=1800)
+
+    assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
+    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")

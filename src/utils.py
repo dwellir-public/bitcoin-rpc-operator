@@ -14,6 +14,7 @@ from pathlib import Path
 import ops
 import requests
 
+import bitcoin
 import constants as c
 
 logger = logging.getLogger(__name__)
@@ -45,21 +46,17 @@ def install_bitcoin(version: str):
     A no-op when version is empty (the config default), so a deploy without
     `version` set lands in BlockedStatus instead of erroring the install hook.
     """
+    bitcoin.install_release(
+        version,
+        c.BINARY_PATH,
+        c.CLI_PATH,
+        is_running=lambda: get_status(c.SERVICE_NAME),
+        stop=stop_service,
+        start=start_service,
+        is_healthy=lambda: service_running(c.SERVICE_NAME),
+    )
     if not version:
-        logger.info("No version set; skipping bitcoind download.")
         return
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        url = c.DL_URL.replace("VERSION", version)
-        response = requests.get(url, timeout=600)
-        response.raise_for_status()
-        tarball = Path(tmp_dir) / url.split("/")[-1]
-        tarball.write_bytes(response.content)
-        sp.run(["tar", "-xzf", str(tarball)], cwd=tmp_dir, check=True)
-        bin_dir = Path(tmp_dir) / f"bitcoin-{version}" / "bin"
-        for name, dest in ((c.BINARY_NAME, c.BINARY_PATH), (c.CLI_NAME, c.CLI_PATH)):
-            sp.run(["cp", bin_dir / name, dest], check=True)
-            sp.run(["chmod", "+x", dest], check=True)
-
     chown()
 
 
@@ -381,6 +378,47 @@ def get_disk_usage(*paths: Path) -> str:
     if disk_usages:
         return ", ".join(f"{path}: {size}" for path, size in disk_usages)
     return "error parsing disk usage"
+
+
+def _finite_int(value: str) -> int | None:
+    if value.casefold() == "infinity":
+        return None
+    parsed = int(value)
+    return None if parsed >= 2**63 else parsed
+
+
+def _timespan_microseconds(value: str) -> float | None:
+    if value.casefold() == "infinity":
+        return None
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(us|ms|s|min|h)?", value)
+    if match is None:
+        return None
+    multipliers = {None: 1.0, "us": 1.0, "ms": 1_000.0, "s": 1_000_000.0, "min": 60_000_000.0, "h": 3_600_000_000.0}
+    return float(match.group(1)) * multipliers[match.group(2)]
+
+
+def get_systemd_limits(service_name: str) -> dict[str, int | float | None]:
+    """Return normalized systemd resource limits for a workload service."""
+    result = sp.run(
+        [
+            "systemctl",
+            "show",
+            service_name,
+            "--property=MemoryMax,MemoryHigh,CPUQuotaPerSecUSec,TasksMax",
+            "--no-pager",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    quota_us = _timespan_microseconds(values.get("CPUQuotaPerSecUSec", "infinity"))
+    return {
+        "memory_max_bytes": _finite_int(values.get("MemoryMax", "infinity")),
+        "memory_high_bytes": _finite_int(values.get("MemoryHigh", "infinity")),
+        "cpu_quota_percent": None if quota_us is None else quota_us / 10_000.0,
+        "tasks_max": _finite_int(values.get("TasksMax", "infinity")),
+    }
 
 
 def get_readme() -> str:

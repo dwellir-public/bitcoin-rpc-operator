@@ -16,6 +16,9 @@ from charm import BitcoinCharm
 
 class TestCharm(unittest.TestCase):
     def setUp(self):
+        metadata_patcher = patch("charm.bitcoin_metadata.collect_upload_metadata", return_value=None)
+        self.mock_collect_metadata = metadata_patcher.start()
+        self.addCleanup(metadata_patcher.stop)
         self.harness = ops.testing.Harness(BitcoinCharm)
         self.addCleanup(self.harness.cleanup)
         self.harness.begin()
@@ -26,105 +29,91 @@ class TestCharm(unittest.TestCase):
         self.assertEqual(self.harness.charm.config.get("rpc-proxy-version"), "0.1.0")
         self.assertTrue(self.harness.charm.config.get("disable-wallet"))
 
+    def test_collector_credentials_config_is_secret_typed(self):
+        self.assertEqual(self.harness.charm.meta.config["collector-s3-credentials"].type, "secret")
+
+    @patch("charm.bitcoin_metadata.collect_upload_metadata")
     @patch("charm.utils")
-    def test_upgrade_rewrites_bitcoind_args_without_restarting(self, mock_utils):
-        # Upgrade must re-render /etc/default/bitcoind so loopback-pin / wallet
-        # hardening reaches units upgraded from a pre-hardening revision, but the
-        # rewrite itself must not restart bitcoind -- the restart is decided
-        # separately from the unit/args change signals.
+    def test_update_status_collects_metadata_after_service_health(self, mock_utils, collect_metadata):
+        mock_utils.get_version.return_value = "v31.1.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.service_running.return_value = True
-        mock_utils.install_service_file.return_value = False
-        mock_utils.update_service_args.return_value = False
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.update_service_args.assert_called_once()
-        _, kwargs = mock_utils.update_service_args.call_args
-        self.assertFalse(kwargs["restart_service"])
+        collect_metadata.return_value = None
 
+        self.harness.charm._update_status()
+
+        collect_metadata.assert_called_once_with(self.harness.charm)
+        self.assertIsInstance(self.harness.charm.unit.status, ops.ActiveStatus)
+
+    @patch("charm.bitcoin_metadata.collect_upload_metadata")
     @patch("charm.utils")
-    def test_upgrade_restarts_bitcoind_on_args_change(self, mock_utils):
-        # A running node whose rendered args changed is restarted once so the new
-        # args take effect.
+    def test_update_status_blocks_on_metadata_failure(self, mock_utils, collect_metadata):
+        mock_utils.get_version.return_value = "v31.1.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.service_running.return_value = True
-        mock_utils.install_service_file.return_value = False
-        mock_utils.update_service_args.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.restart_service.assert_called_once()
+        collect_metadata.return_value = "metadata upload failed: denied"
 
+        self.harness.charm._update_status()
+
+        self.assertEqual(self.harness.charm.unit.status, ops.BlockedStatus("metadata upload failed: denied"))
+
+    @patch("charm.bitcoin_metadata.collect_upload_metadata")
     @patch("charm.utils")
-    def test_upgrade_restarts_bitcoind_on_unit_change(self, mock_utils):
-        # A changed bitcoind.service unit also warrants a restart, even when the
-        # rendered args are unchanged.
+    def test_upgrade_charm_is_metadata_only(self, mock_utils, collect_metadata):
+        mock_utils.get_version.return_value = "v31.1.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.service_running.return_value = True
-        mock_utils.install_service_file.return_value = True
-        mock_utils.update_service_args.return_value = False
-        mock_utils.get_version.return_value = "v-test"
+        collect_metadata.return_value = None
+
         self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.restart_service.assert_called_once()
+
+        collect_metadata.assert_called_once_with(self.harness.charm)
+        for method in (
+            "install_dependencies",
+            "install_service_file",
+            "install_bitcoind_monitor",
+            "install_rpc_proxy_service",
+            "update_service_args",
+            "restart_service",
+            "restart_monitor",
+            "restart_rpc_proxy",
+            "start_service",
+            "stop_service",
+        ):
+            getattr(mock_utils, method).assert_not_called()
 
     @patch("charm.utils")
-    def test_upgrade_does_not_restart_unchanged_bitcoind(self, mock_utils):
-        # A no-op upgrade (no unit/args change) must not disturb a running node.
+    def test_version_change_uses_binary_lifecycle_without_second_restart(self, mock_utils):
+        mock_utils.get_version.return_value = "v31.0.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.service_running.return_value = True
-        mock_utils.install_service_file.return_value = False
-        mock_utils.update_service_args.return_value = False
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.restart_service.assert_not_called()
 
-    @patch("charm.utils")
-    def test_upgrade_does_not_restart_stopped_bitcoind(self, mock_utils):
-        # Args are still rewritten, but a stopped node is not started by an upgrade
-        # even when the unit/args changed.
-        mock_utils.service_running.return_value = False
-        mock_utils.install_service_file.return_value = True
-        mock_utils.update_service_args.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.update_service_args.assert_called_once()
-        _, kwargs = mock_utils.update_service_args.call_args
-        self.assertFalse(kwargs["restart_service"])
-        mock_utils.restart_service.assert_not_called()
+        self.harness.update_config({"version": "31.0"})
 
-    @patch("charm.utils")
-    def test_upgrade_does_not_redownload_binaries(self, mock_utils):
-        # Upgrade re-applies charm logic (unit files, env, args) but the
-        # version-driven binaries belong to _on_config_changed, not the upgrade
-        # hook. It re-renders the proxy unit/env without downloading the binary.
-        mock_utils.service_running.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.install_bitcoin.assert_not_called()
-        mock_utils.install_rpc_proxy.assert_not_called()
-        mock_utils.install_rpc_proxy_service.assert_called_once()
+        mock_utils.install_bitcoin.assert_called_once_with("31.0")
+        mock_utils.update_service_args.assert_not_called()
 
+    @patch(
+        "charm.bitcoin_metadata.redact_runtime_value",
+        side_effect=lambda value: value.replace("secret-value", "REDACTED"),
+    )
     @patch("charm.utils")
-    def test_upgrade_reinstalls_pinned_dependencies(self, mock_utils):
-        # Upgrade must re-run the pinned monitor venv install so a revision that
-        # bumps PIP_PACKAGES (or migrates a unit off a pre-venv revision) lands
-        # the new deps, and re-lay the monitor unit so its venv ExecStart applies.
-        mock_utils.service_running.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.install_dependencies.assert_called_once()
-        mock_utils.install_bitcoind_monitor.assert_called_once()
+    def test_get_node_info_redacts_runtime_and_proxy_values(self, mock_utils, _redact):
+        mock_utils.get_service_args.return_value = "BITCOIND_CLI_ARGS=-rpcpassword=secret-value -txindex=1"
+        mock_utils.get_client_proc_cmdline.return_value = "bitcoind -rpcpassword=secret-value -txindex=1"
+        mock_utils.get_rpc_proxy_env.return_value = "PROXY_UPSTREAM_PASSWORD=secret-value"
+        event = MagicMock()
 
-    @patch("charm.utils")
-    def test_upgrade_restarts_running_monitor(self, mock_utils):
-        # A running monitor is restarted so reinstalled deps take effect.
-        mock_utils.service_running.return_value = True
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.restart_monitor.assert_called_once()
+        self.harness.charm._on_get_node_info_action(event)
 
-    @patch("charm.utils")
-    def test_upgrade_does_not_restart_stopped_monitor(self, mock_utils):
-        # A stopped monitor stays stopped; an upgrade does not start it.
-        mock_utils.service_running.return_value = False
-        mock_utils.get_version.return_value = "v-test"
-        self.harness.charm.on.upgrade_charm.emit()
-        mock_utils.restart_monitor.assert_not_called()
+        results = {}
+        for result_call in event.set_results.call_args_list:
+            results.update(result_call.kwargs["results"])
+        self.assertNotIn("secret-value", repr(results))
 
     @patch("charm.utils")
     def test_cred_rotation_refreshes_proxy_env(self, mock_utils):
@@ -206,6 +195,8 @@ class TestCharm(unittest.TestCase):
         # node-info must cover the proxy: it is the RPC front door.
         mock_utils.rpc_proxy_binary_installed.return_value = True
         mock_utils.get_status.return_value = True
+        mock_utils.get_service_args.return_value = ""
+        mock_utils.get_client_proc_cmdline.return_value = ""
         mock_utils.get_rpc_proxy_env.return_value = "PROXY_LISTEN=0.0.0.0:8331"
         mock_utils.get_rpc_proxy_version.return_value = "0.1.0"
         mock_utils.get_charm_version.return_value = "v0.1.0-6-gd0d4771"
@@ -262,6 +253,9 @@ class TestCharm(unittest.TestCase):
     def test_node_info_action_truncates_event_log_to_16(self, mock_utils):
         # node-info shows only the latest 16 entries, newest last.
         mock_utils.rpc_proxy_binary_installed.return_value = True
+        mock_utils.get_service_args.return_value = ""
+        mock_utils.get_client_proc_cmdline.return_value = ""
+        mock_utils.get_rpc_proxy_env.return_value = ""
         self.harness.charm._stored.event_log = [f"2026-07-06 00:00:{i:02d} UTC  e{i}" for i in range(20)]
         event = MagicMock()
         self.harness.charm._on_get_node_info_action(event)
@@ -307,9 +301,24 @@ class TestCharm(unittest.TestCase):
         self.assertNotIn("hunter2", entry)
 
     @patch("charm.utils")
+    def test_config_changed_redacts_secrets_embedded_in_service_args(self, mock_utils):
+        mock_utils.get_version.return_value = "v-test"
+        mock_utils.service_running.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+
+        self.harness.update_config({"service-args": "-txindex=1 -rpcauth=alice:secret-value"})
+
+        entry = list(self.harness.charm._stored.event_log)[-1]
+        self.assertIn("-rpcauth=REDACTED", entry)
+        self.assertNotIn("secret-value", entry)
+
+    @patch("charm.utils")
     def test_node_info_truncates_long_event_detail(self, mock_utils):
         # A long detail is capped in the node-info view; print-event-log keeps it whole.
         mock_utils.rpc_proxy_binary_installed.return_value = True
+        mock_utils.get_service_args.return_value = ""
+        mock_utils.get_client_proc_cmdline.return_value = ""
+        mock_utils.get_rpc_proxy_env.return_value = ""
         long_detail = "service-args=" + "x" * 100
         self.harness.charm._stored.event_log = [f"2026-07-06 00:00:00 UTC  config-changed  {long_detail}"]
         info_event, print_event = MagicMock(), MagicMock()
@@ -341,8 +350,9 @@ class TestEventLogPersistence(unittest.TestCase):
     design survives a real load-modify-save must run under Scenario.
     """
 
+    @patch("charm.bitcoin_metadata.collect_upload_metadata", return_value=None)
     @patch("charm.utils")
-    def test_event_log_survives_load_and_append(self, mock_utils):
+    def test_event_log_survives_load_and_append(self, mock_utils, _collect_metadata):
         mock_utils.get_version.return_value = "v-test"
         mock_utils.service_running.return_value = True
         mock_utils.bitcoind_binary_installed.return_value = True

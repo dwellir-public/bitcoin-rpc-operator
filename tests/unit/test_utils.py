@@ -4,7 +4,6 @@
 from unittest import mock
 
 import pytest
-import requests
 
 import constants as c
 import utils
@@ -54,29 +53,15 @@ def test_install_dependencies_does_not_use_system_pip():
 # install_bitcoin
 
 
-def test_install_bitcoin_downloads_extracts_and_installs():
+def test_install_bitcoin_delegates_to_verified_release_lifecycle():
     with (
-        mock.patch("utils.requests.get") as get,
-        mock.patch("utils.sp.run") as run,
+        mock.patch("utils.bitcoin.install_release") as install_release,
         mock.patch("utils.chown") as chown,
     ):
-        get.return_value.content = b"tarball-bytes"
         utils.install_bitcoin("31.0")
 
-    url = get.call_args.args[0]
-    assert "31.0" in url
-    assert "VERSION" not in url
-    get.return_value.raise_for_status.assert_called_once()
-
-    tar_cmd = run.call_args_list[0].args[0]
-    assert tar_cmd[:2] == ["tar", "-xzf"]
-    assert tar_cmd[2].endswith(url.split("/")[-1])
-    # Both bitcoind and bitcoin-cli are copied (each followed by a chmod +x).
-    cp_cmds = [call.args[0] for call in run.call_args_list if call.args[0][0] == "cp"]
-    copied = {cmd[2] for cmd in cp_cmds}
-    assert copied == {c.BINARY_PATH, c.CLI_PATH}
-    chmod_cmds = [call.args[0] for call in run.call_args_list if call.args[0][0] == "chmod"]
-    assert {cmd[2] for cmd in chmod_cmds} == {c.BINARY_PATH, c.CLI_PATH}
+    assert install_release.call_args.args == ("31.0", c.BINARY_PATH, c.CLI_PATH)
+    assert set(install_release.call_args.kwargs) == {"is_running", "stop", "start", "is_healthy"}
     chown.assert_called_once()
 
 
@@ -84,28 +69,23 @@ def test_install_bitcoin_is_noop_without_version():
     # version defaults to empty; install must skip cleanly so the unit can
     # block on missing config instead of erroring the hook on a bogus URL.
     with (
-        mock.patch("utils.requests.get") as get,
-        mock.patch("utils.sp.run") as run,
+        mock.patch("utils.bitcoin.install_release") as install_release,
         mock.patch("utils.chown") as chown,
     ):
         utils.install_bitcoin("")
-    get.assert_not_called()
-    run.assert_not_called()
+    install_release.assert_called_once()
     chown.assert_not_called()
 
 
 def test_install_bitcoin_failed_download_skips_install():
     # A failed download must raise before any extraction or install steps run.
     with (
-        mock.patch("utils.requests.get") as get,
-        mock.patch("utils.sp.run") as run,
+        mock.patch("utils.bitcoin.install_release", side_effect=ValueError("checksum")),
         mock.patch("utils.chown") as chown,
     ):
-        get.return_value.raise_for_status.side_effect = requests.HTTPError("404")
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(ValueError, match="checksum"):
             utils.install_bitcoin("99.99")
 
-    run.assert_not_called()
     chown.assert_not_called()
 
 
@@ -167,3 +147,36 @@ def test_install_service_file_installs_when_target_missing():
     with patch_path, mock.patch("utils.shutil") as msh, mock.patch("utils.sp"):
         assert utils.install_service_file("templates/bitcoind.service", "bitcoind") is True
         msh.copyfile.assert_called_once()
+
+
+def test_get_systemd_limits_normalizes_infinity_and_cpu_quota():
+    output = "\n".join(
+        (
+            "MemoryMax=8589934592",
+            "MemoryHigh=infinity",
+            "CPUQuotaPerSecUSec=4s",
+            "TasksMax=4915",
+        )
+    )
+    with mock.patch("utils.sp.run") as run:
+        run.return_value.stdout = output
+        limits = utils.get_systemd_limits("bitcoind")
+
+    assert limits == {
+        "memory_max_bytes": 8589934592,
+        "memory_high_bytes": None,
+        "cpu_quota_percent": 400.0,
+        "tasks_max": 4915,
+    }
+    run.assert_called_once_with(
+        [
+            "systemctl",
+            "show",
+            "bitcoind",
+            "--property=MemoryMax,MemoryHigh,CPUQuotaPerSecUSec,TasksMax",
+            "--no-pager",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )

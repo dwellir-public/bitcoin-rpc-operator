@@ -178,7 +178,7 @@ Mechanics:
 Store only when: upstream status is 200, the body is a JSON object whose `error` field
 is absent or null, and `result` is present. Parse with a minimal struct
 (`struct { Result, Error json.RawMessage }`) at store time — once per TTL window, not
-per caller. Anything else (non-200, JSON-RPC error, unparseable body) is returned to
+per caller. Anything else (non-200, JSON-RPC error, unparsable body) is returned to
 the caller verbatim and not cached, so callers never see stale errors and error
 semantics stay bitcoind's own.
 

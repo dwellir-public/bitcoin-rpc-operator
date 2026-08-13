@@ -1,0 +1,46 @@
+name: Charm Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact commit to build and test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.source_sha }}"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: canonical/setup-lxd@v1
+      - name: Install Juju and Charmcraft
+        run: |
+          sudo snap install juju --channel=3.6/stable --classic
+          sudo snap install charmcraft --classic
+          sudo snap install astral-uv --classic
+      - run: juju bootstrap localhost
+      - run: charmcraft pack --destructive-mode --platform=ubuntu@24.04:amd64
+      - run: CHARM_PATH="$PWD/bitcoin-rpc_ubuntu@24.04-amd64.charm" make integration-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-charm-${{ inputs.source_sha }}
+          path: bitcoin-rpc_ubuntu@24.04-amd64.charm
+          if-no-files-found: error
+      - name: Diagnostics
+        if: always()
+        run: |
+          juju models || true
+          juju status --relations || true
