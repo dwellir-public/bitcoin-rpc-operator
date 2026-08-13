@@ -42,6 +42,13 @@ parts:
       git -c safe.directory="$CRAFT_PROJECT_DIR" -C "$CRAFT_PROJECT_DIR" describe --tags --always 2>/dev/null \
         > "$CRAFT_PART_INSTALL/charm_version" \
         || cat "$CRAFT_PART_SRC/VERSION" > "$CRAFT_PART_INSTALL/charm_version"
+  dispatch:
+    plugin: nil
+    source: .
+    after:
+      - bitcoin-rpc-charm
+    override-build: |
+      install -Dm755 dispatch "$CRAFT_PART_INSTALL/dispatch"
   root-files:
     plugin: dump
     source: .
