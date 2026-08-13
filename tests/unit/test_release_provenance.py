@@ -156,3 +156,10 @@ def test_pr_ci_summary_uses_available_github_runner():
     summary_job = workflow.split("  summary:\n", maxsplit=1)[1]
 
     assert "    runs-on: ubuntu-24.04\n" in summary_job
+
+
+def test_pr_ci_charm_tests_use_available_github_runner():
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    charm_tests_job = workflow.split("  charm-tests:\n", maxsplit=1)[1].split("  exact-artifact:\n", maxsplit=1)[0]
+
+    assert "    runs-on: ubuntu-24.04\n" in charm_tests_job
