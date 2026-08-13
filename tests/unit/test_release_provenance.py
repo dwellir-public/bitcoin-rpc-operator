@@ -149,3 +149,10 @@ def test_pr_ci_builds_exact_head_and_verifies_packed_dispatch():
     assert "charmcraft pack" in workflow
     assert "tests/verify_artifact_dispatch.py" in workflow
     assert "actions/upload-artifact" in workflow
+
+
+def test_pr_ci_summary_uses_available_github_runner():
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    summary_job = workflow.split("  summary:\n", maxsplit=1)[1]
+
+    assert "    runs-on: ubuntu-24.04\n" in summary_job

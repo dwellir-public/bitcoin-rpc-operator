@@ -54,7 +54,7 @@ jobs:
 
   summary:
     name: CI Summary
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: [charm-tests, exact-artifact]
     if: always() # Always run, even if earlier jobs fail
     steps:
