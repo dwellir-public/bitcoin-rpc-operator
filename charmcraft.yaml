@@ -39,7 +39,7 @@ parts:
     # the VERSION tag if .git isn't present in the build sandbox.
     override-build: |
       craftctl default
-      git -C "$CRAFT_PART_SRC" describe --tags --always 2>/dev/null \
+      git -C "$CRAFT_PROJECT_DIR" describe --tags --always 2>/dev/null \
         > "$CRAFT_PART_INSTALL/charm_version" \
         || cat "$CRAFT_PART_SRC/VERSION" > "$CRAFT_PART_INSTALL/charm_version"
   root-files:
