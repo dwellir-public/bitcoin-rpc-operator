@@ -1,5 +1,7 @@
 """Bitcoin Core metadata collection and redaction helpers."""
 
+import ast
+import json
 import re
 import shlex
 from pathlib import Path
@@ -50,9 +52,115 @@ def _key_is_sensitive(key: str) -> bool:
     return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
 
 
+def _parse_serialized(value: str) -> Any | None:
+    """Parse nested JSON or Python literals without executing input."""
+    candidate: Any = value
+    for _ in range(3):
+        if not isinstance(candidate, str):
+            break
+        stripped = candidate.strip()
+        try:
+            candidate = json.loads(stripped)
+            continue
+        except (json.JSONDecodeError, TypeError):
+            pass
+        try:
+            candidate = ast.literal_eval(stripped)
+        except (SyntaxError, ValueError):
+            return None
+    return candidate if isinstance(candidate, (Mapping, list, tuple)) else None
+
+
+def _quoted_char_state(char: str, quote: str, escaped: bool) -> tuple[str, bool, bool]:
+    """Return updated quote state and whether the character was consumed."""
+    if escaped:
+        return quote, False, True
+    if char == "\\":
+        return quote, True, True
+    if quote:
+        return ("" if char == quote else quote), False, True
+    if char in "'\"":
+        return char, False, True
+    return quote, False, False
+
+
+def _container_end(value: str, start: int) -> int | None:
+    """Find one serialized container's end while respecting quoted content."""
+    pairs = {"{": "}", "[": "]"}
+    stack = [pairs[value[start]]]
+    quote = ""
+    escaped = False
+    for index in range(start + 1, len(value)):
+        char = value[index]
+        quote, escaped, consumed = _quoted_char_state(char, quote, escaped)
+        if consumed:
+            continue
+        if char in pairs:
+            stack.append(pairs[char])
+            continue
+        if char not in "}]":
+            continue
+        if char != stack[-1]:
+            return None
+        stack.pop()
+        if not stack:
+            return index
+    return None
+
+
+def _looks_serialized_start(value: str, start: int) -> bool:
+    """Distinguish data containers from IPv6 and human help notation."""
+    remainder = value[start + 1 :].lstrip()
+    if not remainder:
+        return True
+    first = remainder[0]
+    if value[start] == "{":
+        return first in "'\"\\}"
+    return first in "'\"\\[{]-0123456789" or remainder.startswith(("true", "false", "null", "True", "False", "None"))
+
+
+def _redact_serialized_fragments(value: str) -> str | None:
+    """Redact serialized containers embedded in runtime strings."""
+    output: list[str] = []
+    cursor = 0
+    while cursor < len(value):
+        starts = [position for position in (value.find("{", cursor), value.find("[", cursor)) if position >= 0]
+        if not starts:
+            output.append(value[cursor:])
+            break
+        start = min(starts)
+        if not _looks_serialized_start(value, start):
+            output.append(value[cursor : start + 1])
+            cursor = start + 1
+            continue
+        output.append(value[cursor:start])
+        end = _container_end(value, start)
+        if end is None:
+            return None
+
+        parse_start, parse_end = start, end + 1
+        if start > 0 and end + 1 < len(value) and value[start - 1] in "'\"" and value[end + 1] == value[start - 1]:
+            parse_start -= 1
+            parse_end += 1
+        parsed = _parse_serialized(value[parse_start:parse_end])
+        if parsed is None:
+            return None
+        output.append(json.dumps(_redact_value(parsed), separators=(",", ":"), sort_keys=True))
+        cursor = parse_end
+    return "".join(output)
+
+
 def redact_runtime_value(value: str) -> str:
     """Redact credentials from command lines, environment values, and URLs."""
-    redacted = re.sub(r"(?i)(\b[a-z][a-z0-9+.-]*://)[^\s/@]+@", r"\1REDACTED@", value)
+    structured = _redact_serialized_fragments(value)
+    if structured is None:
+        return "REDACTED"
+    redacted = re.sub(r"(?i)(\b[a-z][a-z0-9+.-]*://)[^\s/@]+@", r"\1REDACTED@", structured)
+    redacted = re.sub(
+        r"(?im)^(\s*([a-z][a-z0-9_.-]*)\s*:\s*)([^\r\n]*)$",
+        lambda match: f"{match.group(1)}REDACTED" if _key_is_sensitive(match.group(2)) else match.group(0),
+        redacted,
+    )
     redacted = re.sub(
         r"(?i)(\bauthorization\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,}]+(?:\s+[^\s,}]+)?)",
         r"\1REDACTED",
@@ -106,6 +214,11 @@ def _redact_value(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         return redact_runtime_value(value)
     return value
+
+
+def redact_output(value: Any) -> Any:
+    """Apply recursive redaction at a final payload or action boundary."""
+    return _redact_value(value)
 
 
 class _RedactedRelation:
@@ -294,8 +407,8 @@ def collect_upload_metadata(charm: Any) -> str | None:
             unit=charm.unit,
             meta=charm.meta,
             base_dir=METADATA_DIR,
-            blockchain=_redact_value(blockchain),
-            sections=_redact_value(sections),
+            blockchain=redact_output(blockchain),
+            sections=redact_output(sections),
             credentials=credentials,
             no_upload=credentials is None,
         )

@@ -94,6 +94,46 @@ def test_runtime_redaction_covers_env_flags_headers_and_url_queries():
     assert "safe=visible" in redacted
 
 
+def test_runtime_redaction_recurses_through_serialized_json_and_python_values():
+    value = (
+        'relation={"safe":"visible","nested":{"api_key":"json-secret"}} '
+        "python={'credentials': {'token': 'python-secret'}, 'safe': 'kept'} "
+        'quoted="{\\"password\\":\\"quoted-secret\\",\\"safe\\":\\"inside\\"}"'
+    )
+
+    redacted = metadata.redact_runtime_value(value)
+
+    for secret in ("json-secret", "python-secret", "quoted-secret"):
+        assert secret not in redacted
+    assert "visible" in redacted
+    assert "kept" in redacted
+    assert "inside" in redacted
+
+
+def test_runtime_redaction_covers_multi_word_api_key_header():
+    value = "X-API-Key: three word secret\nX-Safe-Header: visible"
+
+    redacted = metadata.redact_runtime_value(value)
+
+    assert "three word secret" not in redacted
+    assert "X-Safe-Header: visible" in redacted
+
+
+def test_runtime_redaction_fails_closed_on_malformed_serialized_value():
+    value = 'relation={"safe":"visible","api_key":"unterminated-secret"'
+
+    redacted = metadata.redact_runtime_value(value)
+
+    assert redacted == "REDACTED"
+    assert "unterminated-secret" not in redacted
+
+
+def test_runtime_redaction_does_not_treat_ipv6_or_help_brackets_as_serialized_values():
+    value = "bitcoind -rpcbind=[::1]\nUsage: bitcoind [options]"
+
+    assert metadata.redact_runtime_value(value) == value
+
+
 def test_build_runtime_metadata_uses_rpc_identity_and_effective_process_flags(monkeypatch):
     responses = {
         "getnetworkinfo": {"subversion": "/Satoshi:31.1.0/", "protocolversion": 70016},
@@ -196,7 +236,14 @@ def test_collect_metadata_writes_redacted_payload_without_upload(monkeypatch, tm
         "genesis_hash": "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
     }
     monkeypatch.setattr(metadata, "METADATA_DIR", tmp_path)
-    monkeypatch.setattr(metadata, "build_runtime_metadata", lambda _config: (blockchain, {"bitcoin": {}}))
+    monkeypatch.setattr(
+        metadata,
+        "build_runtime_metadata",
+        lambda _config: (
+            blockchain,
+            {"bitcoin": {"relation-data": f'relation={{"api_key":"{secret}","safe":"visible"}}'}},
+        ),
+    )
 
     error = metadata.collect_upload_metadata(charm)
 
@@ -205,6 +252,7 @@ def test_collect_metadata_writes_redacted_payload_without_upload(monkeypatch, tm
     assert secret not in payload
     assert "collector-s3-credentials" not in payload
     assert '"client_version": "31.1.0"' in payload
+    assert "visible" in payload
 
 
 def test_collect_metadata_uses_secret_credentials_for_upload(monkeypatch, tmp_path):

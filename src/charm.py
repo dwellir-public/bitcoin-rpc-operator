@@ -116,6 +116,11 @@ class BitcoinCharm(ops.CharmBase):
         log.append(f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}  {name}")
         self._stored.event_log = log[-_EVENT_LOG_MAX:]
 
+    @staticmethod
+    def _set_action_results(event: ops.ActionEvent, results: dict) -> None:
+        """Set action results only after recursive boundary redaction."""
+        event.set_results(results=bitcoin_metadata.redact_output(results))
+
     def _config_change_summary(self) -> str:
         """Summarize tracked config keys changed since last seen, as comma-joined key=value pairs.
 
@@ -134,56 +139,22 @@ class BitcoinCharm(ops.CharmBase):
         return ", ".join(changes)
 
     def _on_config_changed(self, event: ops.ConfigChangedEvent):
-        """Handle changed configuration, restarting bitcoind at most once.
-
-        Each block records whether bitcoind's args need re-rendering rather than
-        restarting inline; a single update_service_args at the end applies them, so
-        changing several options in one event costs one restart, not several.
-        """
+        """Apply all host-facing config changes as one rollback-safe generation."""
         logger.debug("handling config-changed event")
         summary = self._config_change_summary()
         self._record_event(f"config-changed  {summary}" if summary else "config-changed")
-        restart_bitcoind = False
-
-        if self._stored.rpc_user != self.config.get("rpc-user") or self._stored.rpc_password != self.config.get(
-            "rpc-password"
-        ):
-            utils.install_bitcoind_monitor(self.config, restart_service=True)
-            # The proxy authenticates upstream with these creds too; rewrite its
-            # env and restart it so rotation doesn't leave it probing with dead
-            # credentials until the next proxy config change.
-            if utils.rpc_proxy_binary_installed():
-                utils.write_rpc_proxy_env_file(self.config)
-                utils.restart_rpc_proxy()
-            self._stored.rpc_password = self.config.get("rpc-password")
-            self._stored.rpc_user = self.config.get("rpc-user")
-            restart_bitcoind = True
-
-        if self._stored.service_args != self.config.get("service-args"):
-            self._stored.service_args = self.config.get("service-args")
-            restart_bitcoind = True
-
-        # Toggling disable-wallet rewrites bitcoind's own args (the loopback pin is
-        # unconditional, so only the wallet flag can change here).
-        if self._stored.disable_wallet != self.config.get("disable-wallet"):
-            self._stored.disable_wallet = self.config.get("disable-wallet")
-            restart_bitcoind = True
-
-        if self._stored.version != self.config.get("version"):
-            utils.install_bitcoin(str(self.config.get("version") or ""), self.config)
-            self._stored.version = self.config.get("version")
-
-        # Refresh the proxy (binary/unit/env, start or stop) before re-rendering
-        # bitcoind's args, so the loopback pin only engages once the binary exists.
-        if self._rpc_proxy_config_changed():
-            self._reconcile_rpc_proxy()
-            self._stored.rpc_proxy_filter = self.config.get("rpc-proxy-filter")
-            self._stored.rpc_proxy_version = self.config.get("rpc-proxy-version")
-            self._stored.rpc_proxy_listen = self.config.get("rpc-proxy-listen")
-            self._stored.rpc_proxy_extend_allowlist = self.config.get("rpc-proxy-extend-allowlist")
-
-        if restart_bitcoind:
-            utils.update_service_args(self.config, restart_service=True)
+        changed_keys = {key for key, attr in _TRACKED_CONFIG if getattr(self._stored, attr) != self.config.get(key)}
+        previous_config = dict(self.config)
+        for key, attr in _TRACKED_CONFIG:
+            previous_config[key] = getattr(self._stored, attr)
+        utils.apply_config_transaction(
+            self.config,
+            previous_config=previous_config,
+            changed_keys=changed_keys,
+        )
+        for key, attr in _TRACKED_CONFIG:
+            if key in changed_keys:
+                setattr(self._stored, attr, self.config.get(key))
 
         self._update_status()
 
@@ -303,48 +274,46 @@ class BitcoinCharm(ops.CharmBase):
     def _on_get_node_help_action(self, event: ops.ActionEvent) -> None:
         logger.debug("handling get-node-help action")
         self._record_event("get-node-help")
-        event.set_results(results={"help-output": utils.get_client_help_output()})
+        self._set_action_results(event, {"help-output": utils.get_client_help_output()})
 
     def _on_get_node_info_action(self, event: ops.ActionEvent) -> None:
         """Provide information about the node to the action's results."""
         logger.debug("handling get-node-info action")
         self._record_event("get-node-info")
         # Charm
-        event.set_results(results={"charm-version": utils.get_charm_version()})
+        self._set_action_results(event, {"charm-version": utils.get_charm_version()})
         # Disk usage
         disk_usage = utils.get_disk_usage(c.HOME_DIR)
-        event.set_results(results={"disk-usage": disk_usage})
+        self._set_action_results(event, {"disk-usage": disk_usage})
         # Client
-        event.set_results(results={"client-version": utils.get_version()})
-        event.set_results(
-            results={"client-service-args": bitcoin_metadata.redact_runtime_value(utils.get_service_args())}
-        )
+        self._set_action_results(event, {"client-version": utils.get_version()})
+        self._set_action_results(event, {"client-service-args": utils.get_service_args()})
         proc_cmdline = utils.get_client_proc_cmdline()
         if proc_cmdline:
-            event.set_results(results={"client-proc-cmdline": bitcoin_metadata.redact_runtime_value(proc_cmdline)})
+            self._set_action_results(event, {"client-proc-cmdline": proc_cmdline})
         else:
-            event.set_results(results={"client-proc-cmdline": "process not found"})
+            self._set_action_results(event, {"client-proc-cmdline": "process not found"})
         # RPC proxy
-        event.set_results(results={"rpc-proxy-installed": utils.rpc_proxy_binary_installed()})
-        event.set_results(results={"rpc-proxy-version": utils.get_rpc_proxy_version()})
-        event.set_results(results={"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
-        event.set_results(results={"rpc-proxy-env": bitcoin_metadata.redact_runtime_value(utils.get_rpc_proxy_env())})
+        self._set_action_results(event, {"rpc-proxy-installed": utils.rpc_proxy_binary_installed()})
+        self._set_action_results(event, {"rpc-proxy-version": utils.get_rpc_proxy_version()})
+        self._set_action_results(event, {"rpc-proxy-running": utils.get_status(c.RPC_PROXY_SERVICE_NAME)})
+        self._set_action_results(event, {"rpc-proxy-env": utils.get_rpc_proxy_env()})
         # Event log (latest 16 to keep the combined output readable, with each
         # entry's detail truncated; use print-event-log for the full history).
         recent = [_truncate_event_detail(line) for line in list(self._stored.event_log)[-16:]]
-        event.set_results(results={"event-log": "\n".join(recent)})
+        self._set_action_results(event, {"event-log": "\n".join(recent)})
 
     def _on_print_event_log_action(self, event: ops.ActionEvent) -> None:
         """Print the full recorded event log to the action's results."""
         logger.debug("handling print-event-log action")
         self._record_event("print-event-log")
-        event.set_results(results={"event-log": "\n".join(self._stored.event_log)})
+        self._set_action_results(event, {"event-log": "\n".join(self._stored.event_log)})
 
     def _on_print_readme_action(self, event: ops.ActionEvent) -> None:
         """Print the README.md file to the action's results."""
         logger.debug("handling print-readme action")
         self._record_event("print-readme")
-        event.set_results(results={"readme": utils.get_readme()})
+        self._set_action_results(event, {"readme": utils.get_readme()})
 
     def _on_restart_node_action(self, event: ops.ActionEvent) -> None:
         logger.debug("handling restart-node action")

@@ -86,7 +86,7 @@ class TestCharm(unittest.TestCase):
             getattr(mock_utils, method).assert_not_called()
 
     @patch("charm.utils")
-    def test_version_change_uses_binary_lifecycle_without_second_restart(self, mock_utils):
+    def test_version_change_uses_transactional_config_lifecycle(self, mock_utils):
         mock_utils.get_version.return_value = "v31.0.0"
         mock_utils.bitcoind_binary_installed.return_value = True
         mock_utils.rpc_proxy_binary_installed.return_value = True
@@ -94,8 +94,50 @@ class TestCharm(unittest.TestCase):
 
         self.harness.update_config({"version": "31.0"})
 
-        mock_utils.install_bitcoin.assert_called_once_with("31.0", self.harness.charm.config)
-        mock_utils.update_service_args.assert_not_called()
+        mock_utils.apply_config_transaction.assert_called_once()
+        transaction = mock_utils.apply_config_transaction.call_args
+        self.assertIs(transaction.args[0], self.harness.charm.config)
+        self.assertEqual(transaction.kwargs["changed_keys"], {"version"})
+        mock_utils.install_bitcoin.assert_not_called()
+
+    @patch("charm.utils")
+    def test_combined_credential_and_version_change_commits_stored_state_after_transaction(self, mock_utils):
+        mock_utils.get_version.return_value = "v31.0.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        mock_utils.service_running.return_value = True
+
+        self.harness.update_config(
+            {
+                "rpc-user": "new-user",
+                "rpc-password": "new-password",
+                "service-args": "-txindex=1",
+                "version": "31.0",
+            }
+        )
+
+        transaction = mock_utils.apply_config_transaction.call_args
+        self.assertEqual(
+            transaction.kwargs["changed_keys"],
+            {"rpc-user", "rpc-password", "service-args", "version"},
+        )
+        self.assertNotEqual(transaction.kwargs["previous_config"]["rpc-user"], "new-user")
+        self.assertNotEqual(transaction.kwargs["previous_config"]["rpc-password"], "new-password")
+        self.assertNotEqual(transaction.kwargs["previous_config"]["version"], "31.0")
+        self.assertEqual(self.harness.charm._stored.rpc_user, "new-user")
+        self.assertEqual(self.harness.charm._stored.rpc_password, "new-password")
+        self.assertEqual(self.harness.charm._stored.service_args, "-txindex=1")
+        self.assertEqual(self.harness.charm._stored.version, "31.0")
+
+    @patch("charm.utils")
+    def test_failed_config_transaction_preserves_previous_stored_state(self, mock_utils):
+        mock_utils.apply_config_transaction.side_effect = RuntimeError("activation failed")
+
+        with self.assertRaisesRegex(RuntimeError, "activation failed"):
+            self.harness.update_config({"rpc-user": "new-user", "version": "31.0"})
+
+        self.assertNotEqual(self.harness.charm._stored.rpc_user, "new-user")
+        self.assertNotEqual(self.harness.charm._stored.version, "31.0")
 
     @patch(
         "charm.bitcoin_metadata.redact_runtime_value",
@@ -116,27 +158,28 @@ class TestCharm(unittest.TestCase):
         self.assertNotIn("secret-value", repr(results))
 
     @patch("charm.utils")
+    def test_action_result_boundary_recursively_redacts_serialized_secrets(self, mock_utils):
+        mock_utils.get_client_help_output.return_value = (
+            'relation={"headers":{"X-API-Key":"action boundary secret"},"safe":"visible"}'
+        )
+        event = MagicMock()
+
+        self.harness.charm._on_get_node_help_action(event)
+
+        results = event.set_results.call_args.kwargs["results"]
+        self.assertNotIn("action boundary secret", repr(results))
+        self.assertIn("visible", repr(results))
+
+    @patch("charm.utils")
     def test_cred_rotation_refreshes_proxy_env(self, mock_utils):
-        # Rotating rpc-user/rpc-password must rewrite the proxy's env file and
-        # restart it, or it keeps probing upstream with dead credentials.
+        # Credential rotation must enter the transaction that updates every RPC consumer.
         mock_utils.get_version.return_value = "v-test"
         mock_utils.service_running.return_value = True
         mock_utils.bitcoind_binary_installed.return_value = True
         mock_utils.rpc_proxy_binary_installed.return_value = True
         self.harness.update_config({"rpc-user": "rotated", "rpc-password": "rotated"})
-        mock_utils.write_rpc_proxy_env_file.assert_called_once()
-        mock_utils.restart_rpc_proxy.assert_called_once()
-
-    @patch("charm.utils")
-    def test_cred_rotation_skips_proxy_without_binary(self, mock_utils):
-        # A blocked unit (no proxy binary) has no proxy service to refresh.
-        mock_utils.get_version.return_value = "v-test"
-        mock_utils.service_running.return_value = True
-        mock_utils.bitcoind_binary_installed.return_value = True
-        mock_utils.rpc_proxy_binary_installed.return_value = False
-        self.harness.update_config({"rpc-user": "rotated"})
-        mock_utils.write_rpc_proxy_env_file.assert_not_called()
-        mock_utils.restart_rpc_proxy.assert_not_called()
+        transaction = mock_utils.apply_config_transaction.call_args
+        self.assertEqual(transaction.kwargs["changed_keys"], {"rpc-user", "rpc-password"})
 
     @patch("charm.utils")
     def test_update_status_blocks_without_bitcoind_binary(self, mock_utils):

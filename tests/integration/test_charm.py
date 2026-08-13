@@ -254,7 +254,9 @@ def test_release_replacement_preserves_stopped_state(juju: jubilant.Juju):
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
 
     juju.config(APP, {"version": VERSION})
-    juju.wait(lambda status: APP in status.apps, timeout=1800)
+    completed = juju.run(UNIT, "print-event-log", wait=1800)
+    assert completed.status == "completed"
+    assert f"version={VERSION}" in completed.results["event-log"]
 
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
     assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")

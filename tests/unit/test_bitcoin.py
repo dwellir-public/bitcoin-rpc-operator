@@ -96,6 +96,45 @@ def test_install_release_rolls_back_when_running_rpc_version_is_wrong(tmp_path):
     assert events == ["running", "stop", "start", "ready", "stop", "start"]
 
 
+def test_install_release_rolls_back_both_binaries_when_replacement_start_fails(tmp_path):
+    daemon = tmp_path / "bitcoind"
+    cli = tmp_path / "bitcoin-cli"
+    daemon.write_bytes(b"old-daemon")
+    cli.write_bytes(b"old-cli")
+    payload = _release("31.0")
+    release, sums = _responses(payload)
+    events = []
+    starts = iter((RuntimeError("replacement start failed"), None))
+
+    def start():
+        events.append("start")
+        failure = next(starts)
+        if failure is not None:
+            raise failure
+
+    with (
+        mock.patch("bitcoin.requests.get", side_effect=[release, sums]),
+        mock.patch(
+            "bitcoin.sp.run",
+            return_value=mock.MagicMock(stdout="Bitcoin Core daemon version v31.0.0 bitcoind\n"),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="replacement start failed"):
+            bitcoin.install_release(
+                "31.0",
+                daemon,
+                cli,
+                is_running=lambda: events.append("running") or True,
+                stop=lambda: events.append("stop"),
+                start=start,
+                wait_for_running_version=lambda: "v31.0.0",
+            )
+
+    assert daemon.read_bytes() == b"old-daemon"
+    assert cli.read_bytes() == b"old-cli"
+    assert events == ["running", "stop", "start", "stop", "start"]
+
+
 def test_install_release_recovers_old_service_when_initial_stop_fails(tmp_path):
     daemon = tmp_path / "bitcoind"
     cli = tmp_path / "bitcoin-cli"

@@ -93,6 +93,128 @@ def test_install_bitcoin_failed_download_skips_install():
     chown.assert_not_called()
 
 
+def test_config_transaction_applies_one_credential_set_before_binary_readiness(tmp_path, monkeypatch):
+    paths = tuple(tmp_path / name for name in ("bitcoind", "bitcoin-cli", "proxy", "node-env", "monitor-env"))
+    for path in paths:
+        path.write_text(f"old-{path.name}")
+    monkeypatch.setattr(utils, "_transaction_paths", lambda: paths)
+    monkeypatch.setattr(utils, "get_status", lambda _service: True)
+    events = []
+    new_config = {
+        "rpc-user": "new-user",
+        "rpc-password": "new-password",
+        "service-args": "-txindex=1",
+        "version": "31.0",
+        "rpc-proxy-version": "0.2.0",
+    }
+    previous_config = {**new_config, "rpc-user": "old-user", "rpc-password": "old-password", "version": "30.0"}
+
+    monkeypatch.setattr(utils, "install_rpc_proxy", lambda version: events.append(("proxy-binary", version)))
+    monkeypatch.setattr(
+        utils,
+        "update_service_args",
+        lambda config, restart_service: events.append(("node-args", config["rpc-user"], restart_service)),
+    )
+    monkeypatch.setattr(
+        utils,
+        "install_bitcoind_monitor",
+        lambda config, restart_service: events.append(("monitor-env", config["rpc-user"], restart_service)),
+    )
+    monkeypatch.setattr(
+        utils,
+        "install_rpc_proxy_service",
+        lambda config, restart_service: events.append(("proxy-env", config["rpc-user"], restart_service)),
+    )
+    monkeypatch.setattr(
+        utils,
+        "install_bitcoin",
+        lambda version, config: events.append(("bitcoin-ready", version, config["rpc-user"])),
+    )
+    monkeypatch.setattr(utils, "restart_monitor", lambda: events.append(("monitor-restart",)))
+    monkeypatch.setattr(utils, "restart_rpc_proxy", lambda: events.append(("proxy-restart",)))
+    monkeypatch.setattr(utils, "rpc_proxy_binary_installed", lambda: True)
+    monkeypatch.setattr(utils, "service_running", lambda _service: True)
+
+    utils.apply_config_transaction(
+        new_config,
+        previous_config=previous_config,
+        changed_keys={"rpc-user", "rpc-password", "service-args", "version", "rpc-proxy-version"},
+    )
+
+    assert events == [
+        ("proxy-binary", "0.2.0"),
+        ("node-args", "new-user", False),
+        ("monitor-env", "new-user", False),
+        ("proxy-env", "new-user", False),
+        ("bitcoin-ready", "31.0", "new-user"),
+        ("monitor-restart",),
+        ("proxy-restart",),
+    ]
+
+
+def test_config_transaction_rolls_back_all_files_and_service_states_on_start_failure(tmp_path, monkeypatch):
+    paths = tuple(tmp_path / name for name in ("bitcoind", "bitcoin-cli", "proxy", "node-env", "monitor-env"))
+    old_contents = {path: f"old-{path.name}".encode() for path in paths}
+    for path, content in old_contents.items():
+        path.write_bytes(content)
+    monkeypatch.setattr(utils, "_transaction_paths", lambda: paths)
+    prior_states = {
+        c.SERVICE_NAME: True,
+        c.MONITOR_SERVICE_NAME: False,
+        c.RPC_PROXY_SERVICE_NAME: True,
+    }
+    monkeypatch.setattr(utils, "get_status", prior_states.__getitem__)
+    service_events = []
+    monkeypatch.setattr(utils, "stop_service", lambda: service_events.append("stop-node"))
+    monkeypatch.setattr(utils, "stop_monitor", lambda: service_events.append("stop-monitor"))
+    monkeypatch.setattr(utils, "stop_rpc_proxy", lambda: service_events.append("stop-proxy"))
+    monkeypatch.setattr(utils, "start_service", lambda: service_events.append("start-node"))
+    monkeypatch.setattr(utils, "start_monitor", lambda: service_events.append("start-monitor"))
+    monkeypatch.setattr(utils, "start_rpc_proxy", lambda: service_events.append("start-proxy"))
+    monkeypatch.setattr(utils.sp, "run", lambda *_args, **_kwargs: None)
+    previous_config = {"rpc-user": "old-user", "rpc-password": "old-password", "version": "30.0"}
+    readiness_configs = []
+    monkeypatch.setattr(
+        utils,
+        "wait_for_running_version",
+        lambda config: readiness_configs.append(config) or "30.0",
+    )
+    monkeypatch.setattr(utils, "service_running", lambda _service: True)
+
+    def replace_files(*_args, **_kwargs):
+        for path in paths:
+            path.write_text(f"new-{path.name}")
+
+    monkeypatch.setattr(utils, "install_rpc_proxy", lambda _version: paths[2].write_text("new-proxy"))
+    monkeypatch.setattr(utils, "update_service_args", replace_files)
+    monkeypatch.setattr(utils, "install_bitcoind_monitor", replace_files)
+    monkeypatch.setattr(utils, "install_rpc_proxy_service", replace_files)
+    monkeypatch.setattr(utils, "install_bitcoin", replace_files)
+    monkeypatch.setattr(utils, "restart_monitor", lambda: None)
+    monkeypatch.setattr(utils, "rpc_proxy_binary_installed", lambda: True)
+    monkeypatch.setattr(
+        utils,
+        "restart_rpc_proxy",
+        lambda: (_ for _ in ()).throw(RuntimeError("proxy start failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="proxy start failed"):
+        utils.apply_config_transaction(
+            {
+                "rpc-user": "new-user",
+                "rpc-password": "new-password",
+                "version": "31.0",
+                "rpc-proxy-version": "0.2.0",
+            },
+            previous_config=previous_config,
+            changed_keys={"rpc-user", "rpc-password", "version", "rpc-proxy-version"},
+        )
+
+    assert {path: path.read_bytes() for path in paths} == old_contents
+    assert service_events == ["stop-proxy", "stop-monitor", "stop-node", "start-node", "start-proxy"]
+    assert readiness_configs == [previous_config]
+
+
 @pytest.mark.parametrize(
     ("operation", "command"),
     [

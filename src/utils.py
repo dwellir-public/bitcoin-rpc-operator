@@ -10,6 +10,7 @@ import subprocess as sp
 import tempfile
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import ops
@@ -19,6 +20,18 @@ import bitcoin
 import constants as c
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _FileState:
+    data: bytes | None
+    mode: int | None
+
+
+@dataclass(frozen=True)
+class _ConfigTransactionSnapshot:
+    files: dict[Path, _FileState]
+    running: dict[str, bool]
 
 
 # CONFIG AND INSTALLATION
@@ -144,6 +157,205 @@ def install_rpc_proxy_service(config: ops.ConfigData, restart_service: bool) -> 
     write_rpc_proxy_env_file(config)
     if restart_service:
         restart_rpc_proxy()
+
+
+def _transaction_paths() -> tuple[Path, ...]:
+    """Return every file a config transaction can replace."""
+    return (
+        c.BINARY_PATH,
+        c.CLI_PATH,
+        c.RPC_PROXY_BINARY_PATH,
+        Path(f"/etc/default/{c.SERVICE_NAME}"),
+        Path(f"/etc/default/{c.MONITOR_SERVICE_NAME}"),
+        Path(f"/etc/default/{c.RPC_PROXY_SERVICE_NAME}"),
+        c.MONITOR_SCRIPT_PATH,
+        Path(f"/etc/systemd/system/{c.SERVICE_NAME}.service"),
+        Path(f"/etc/systemd/system/{c.MONITOR_SERVICE_NAME}.service"),
+        Path(f"/etc/systemd/system/{c.RPC_PROXY_SERVICE_NAME}.service"),
+    )
+
+
+def _capture_config_transaction() -> _ConfigTransactionSnapshot:
+    files = {
+        path: _FileState(
+            data=path.read_bytes() if path.exists() else None,
+            mode=(path.stat().st_mode & 0o7777) if path.exists() else None,
+        )
+        for path in _transaction_paths()
+    }
+    running = {
+        service: get_status(service) for service in (c.SERVICE_NAME, c.MONITOR_SERVICE_NAME, c.RPC_PROXY_SERVICE_NAME)
+    }
+    return _ConfigTransactionSnapshot(files=files, running=running)
+
+
+def _restore_file(path: Path, state: _FileState) -> None:
+    if state.data is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.rollback-")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(state.data)
+        if state.mode is not None:
+            os.chmod(temporary, state.mode)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _restored_service_errors(snapshot: _ConfigTransactionSnapshot, previous_config: Mapping[str, object]) -> list[str]:
+    """Return readiness errors for services that ran before the transaction."""
+    errors = []
+    if snapshot.running[c.SERVICE_NAME]:
+        try:
+            if wait_for_running_version(previous_config) is None:
+                errors.append("node readiness: Bitcoin Core RPC did not recover")
+        except BaseException as exc:
+            errors.append(f"node readiness: {exc}")
+    for service, name in (
+        (c.MONITOR_SERVICE_NAME, "monitor readiness"),
+        (c.RPC_PROXY_SERVICE_NAME, "proxy readiness"),
+    ):
+        if snapshot.running[service] and not service_running(service):
+            errors.append(f"{name}: service did not recover")
+    return errors
+
+
+def _rollback_config_transaction(
+    snapshot: _ConfigTransactionSnapshot,
+    cause: BaseException,
+    previous_config: Mapping[str, object],
+) -> None:
+    errors = []
+    operations = (
+        ("stop proxy", stop_rpc_proxy),
+        ("stop monitor", stop_monitor),
+        ("stop node", stop_service),
+    )
+    for name, operation in operations:
+        try:
+            operation()
+        except BaseException as exc:
+            errors.append(f"{name}: {exc}")
+    for path, state in snapshot.files.items():
+        try:
+            _restore_file(path, state)
+        except BaseException as exc:
+            errors.append(f"restore {path.name}: {exc}")
+    try:
+        sp.run(["systemctl", "daemon-reload"], check=True)
+    except BaseException as exc:
+        errors.append(f"daemon-reload: {exc}")
+    starts = (
+        (c.SERVICE_NAME, "start node", start_service),
+        (c.MONITOR_SERVICE_NAME, "start monitor", start_monitor),
+        (c.RPC_PROXY_SERVICE_NAME, "start proxy", start_rpc_proxy),
+    )
+    for service, name, operation in starts:
+        if not snapshot.running[service]:
+            continue
+        try:
+            operation()
+        except BaseException as exc:
+            errors.append(f"{name}: {exc}")
+    errors.extend(_restored_service_errors(snapshot, previous_config))
+    if errors:
+        raise RuntimeError(f"config rollback failed ({'; '.join(errors)})") from cause
+
+
+def _write_config_generation(
+    config: Mapping[str, object],
+    changed_keys: set[str],
+    *,
+    credentials_changed: bool,
+    node_changed: bool,
+    proxy_changed: bool,
+) -> None:
+    """Write one internally consistent set of managed files."""
+    if "rpc-proxy-version" in changed_keys:
+        install_rpc_proxy(str(config.get("rpc-proxy-version") or ""))
+    if node_changed:
+        update_service_args(config, restart_service=False)  # type: ignore[arg-type]
+    if credentials_changed:
+        install_bitcoind_monitor(config, restart_service=False)  # type: ignore[arg-type]
+    if proxy_changed:
+        install_rpc_proxy_service(config, restart_service=False)  # type: ignore[arg-type]
+
+
+def _activate_config_generation(
+    config: Mapping[str, object],
+    changed_keys: set[str],
+    snapshot: _ConfigTransactionSnapshot,
+    *,
+    credentials_changed: bool,
+    node_changed: bool,
+    proxy_changed: bool,
+) -> None:
+    """Activate one written generation and prove each prior service recovered."""
+    if "version" in changed_keys:
+        install_bitcoin(str(config.get("version") or ""), config)
+    elif node_changed and snapshot.running[c.SERVICE_NAME]:
+        restart_service()
+        if wait_for_running_version(config) is None:
+            raise RuntimeError("Bitcoin Core did not become RPC-ready after config change")
+
+    if credentials_changed and snapshot.running[c.MONITOR_SERVICE_NAME]:
+        restart_monitor()
+        if not service_running(c.MONITOR_SERVICE_NAME):
+            raise RuntimeError("bitcoind monitor did not become ready after config change")
+    if proxy_changed and snapshot.running[c.RPC_PROXY_SERVICE_NAME]:
+        if not rpc_proxy_binary_installed():
+            raise RuntimeError("RPC proxy binary is missing after config change")
+        restart_rpc_proxy()
+        if not service_running(c.RPC_PROXY_SERVICE_NAME):
+            raise RuntimeError("RPC proxy did not become ready after config change")
+    if snapshot.running[c.SERVICE_NAME] and not service_running(c.SERVICE_NAME):
+        raise RuntimeError("Bitcoin Core did not remain running after config change")
+
+
+def apply_config_transaction(
+    config: Mapping[str, object],
+    *,
+    previous_config: Mapping[str, object],
+    changed_keys: set[str],
+) -> None:
+    """Apply one config generation and restore every managed file on failure."""
+    if not changed_keys:
+        return
+    snapshot = _capture_config_transaction()
+    credentials_changed = bool({"rpc-user", "rpc-password"} & changed_keys)
+    node_changed = bool({"rpc-user", "rpc-password", "service-args", "disable-wallet", "version"} & changed_keys)
+    proxy_changed = credentials_changed or bool(
+        {
+            "rpc-proxy-filter",
+            "rpc-proxy-version",
+            "rpc-proxy-listen",
+            "rpc-proxy-extend-allowlist",
+        }
+        & changed_keys
+    )
+    try:
+        _write_config_generation(
+            config,
+            changed_keys,
+            credentials_changed=credentials_changed,
+            node_changed=node_changed,
+            proxy_changed=proxy_changed,
+        )
+        _activate_config_generation(
+            config,
+            changed_keys,
+            snapshot,
+            credentials_changed=credentials_changed,
+            node_changed=node_changed,
+            proxy_changed=proxy_changed,
+        )
+    except BaseException as exc:
+        _rollback_config_transaction(snapshot, exc, previous_config)
+        raise
 
 
 # SERVICES
