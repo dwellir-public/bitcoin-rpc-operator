@@ -8,14 +8,31 @@ import tarfile
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
 import constants as c
 
 
-def _release_urls(version: str) -> tuple[str, str]:
-    release_url = c.DL_URL.replace("VERSION", version)
+def _release_urls(version: str, binary_url: str = "") -> tuple[str, str]:
+    if re.fullmatch(r"\d+(?:\.\d+){1,2}", version) is None:
+        raise ValueError("version must contain two or three numeric components")
+    expected_filename = f"bitcoin-{version}-x86_64-linux-gnu.tar.gz"
+    release_url = binary_url.strip() or c.DL_URL.replace("VERSION", version)
+    parsed = urlsplit(release_url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or Path(parsed.path).name != expected_filename
+    ):
+        raise ValueError(
+            f"binary-url must be an HTTPS URL without credentials, query, or fragment, ending in {expected_filename}"
+        )
     checksum_url = release_url.rsplit("/", 1)[0] + "/SHA256SUMS"
     return release_url, checksum_url
 
@@ -168,6 +185,7 @@ def install_release(
     binary_path: Path,
     cli_path: Path,
     *,
+    binary_url: str = "",
     is_running: Callable[[], bool],
     stop: Callable[[], None],
     start: Callable[[], None],
@@ -181,7 +199,7 @@ def install_release(
     """
     if not version:
         return
-    release_url, checksum_url = _release_urls(version)
+    release_url, checksum_url = _release_urls(version, binary_url)
     release = requests.get(release_url, timeout=600)
     release.raise_for_status()
     sums = requests.get(checksum_url, timeout=60)

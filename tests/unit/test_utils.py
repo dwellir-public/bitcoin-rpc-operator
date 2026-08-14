@@ -55,16 +55,24 @@ def test_install_dependencies_does_not_use_system_pip():
 
 def test_install_bitcoin_delegates_to_verified_release_lifecycle():
     config = {"rpc-user": "alice", "rpc-password": "secret"}
+    binary_url = "https://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz"
     with (
         mock.patch("utils.bitcoin.install_release") as install_release,
         mock.patch("utils.chown") as chown,
         mock.patch("utils.wait_for_running_version", return_value="31.0.0") as wait_ready,
     ):
-        utils.install_bitcoin("31.0", config)
+        utils.install_bitcoin("31.0", config, binary_url=binary_url)
         assert install_release.call_args.kwargs["wait_for_running_version"]() == "31.0.0"
 
     assert install_release.call_args.args == ("31.0", c.BINARY_PATH, c.CLI_PATH)
-    assert set(install_release.call_args.kwargs) == {"is_running", "stop", "start", "wait_for_running_version"}
+    assert set(install_release.call_args.kwargs) == {
+        "binary_url",
+        "is_running",
+        "stop",
+        "start",
+        "wait_for_running_version",
+    }
+    assert install_release.call_args.kwargs["binary_url"] == binary_url
     wait_ready.assert_called_once_with(config)
     chown.assert_called_once()
 
@@ -105,9 +113,16 @@ def test_config_transaction_applies_one_credential_set_before_binary_readiness(t
         "rpc-password": "new-password",
         "service-args": "-txindex=1",
         "version": "31.0",
+        "binary-url": "https://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz",
         "rpc-proxy-version": "0.2.0",
     }
-    previous_config = {**new_config, "rpc-user": "old-user", "rpc-password": "old-password", "version": "30.0"}
+    previous_config = {
+        **new_config,
+        "rpc-user": "old-user",
+        "rpc-password": "old-password",
+        "version": "30.0",
+        "binary-url": "https://downloads.example.test/bitcoin-30.0-x86_64-linux-gnu.tar.gz",
+    }
 
     monkeypatch.setattr(utils, "install_rpc_proxy", lambda version: events.append(("proxy-binary", version)))
     monkeypatch.setattr(
@@ -128,7 +143,9 @@ def test_config_transaction_applies_one_credential_set_before_binary_readiness(t
     monkeypatch.setattr(
         utils,
         "install_bitcoin",
-        lambda version, config: events.append(("bitcoin-ready", version, config["rpc-user"])),
+        lambda version, config, *, binary_url: events.append(
+            ("bitcoin-ready", version, binary_url, config["rpc-user"])
+        ),
     )
     monkeypatch.setattr(utils, "restart_monitor", lambda: events.append(("monitor-restart",)))
     monkeypatch.setattr(utils, "restart_rpc_proxy", lambda: events.append(("proxy-restart",)))
@@ -138,7 +155,14 @@ def test_config_transaction_applies_one_credential_set_before_binary_readiness(t
     utils.apply_config_transaction(
         new_config,
         previous_config=previous_config,
-        changed_keys={"rpc-user", "rpc-password", "service-args", "version", "rpc-proxy-version"},
+        changed_keys={
+            "rpc-user",
+            "rpc-password",
+            "service-args",
+            "version",
+            "binary-url",
+            "rpc-proxy-version",
+        },
     )
 
     assert events == [
@@ -146,7 +170,12 @@ def test_config_transaction_applies_one_credential_set_before_binary_readiness(t
         ("node-args", "new-user", False),
         ("monitor-env", "new-user", False),
         ("proxy-env", "new-user", False),
-        ("bitcoin-ready", "31.0", "new-user"),
+        (
+            "bitcoin-ready",
+            "31.0",
+            "https://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz",
+            "new-user",
+        ),
         ("monitor-restart",),
         ("proxy-restart",),
     ]

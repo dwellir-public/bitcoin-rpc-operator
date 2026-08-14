@@ -90,7 +90,15 @@ config:
     version:
       type: string
       description: |
-        The version of the Bitcoin client to install.
+        The Bitcoin Core version to install and verify. Existing deployments can
+        leave binary-url empty to use the matching bitcoincore.org release.
+      default: ""
+    binary-url:
+      type: string
+      description: |
+        Optional exact Bitcoin Core amd64 archive URL. It must use HTTPS, contain
+        no credentials, query, or fragment, and match the configured version.
+        The charm verifies the archive against the sibling SHA256SUMS file.
       default: ""
     collector-s3-credentials:
       type: secret

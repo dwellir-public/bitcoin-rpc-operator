@@ -101,6 +101,20 @@ class TestCharm(unittest.TestCase):
         mock_utils.install_bitcoin.assert_not_called()
 
     @patch("charm.utils")
+    def test_binary_url_change_uses_transactional_config_lifecycle(self, mock_utils):
+        mock_utils.get_version.return_value = "v31.0.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        mock_utils.service_running.return_value = True
+        binary_url = "https://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz"
+
+        self.harness.update_config({"version": "31.0", "binary-url": binary_url})
+
+        transaction = mock_utils.apply_config_transaction.call_args
+        self.assertEqual(transaction.kwargs["changed_keys"], {"version", "binary-url"})
+        self.assertEqual(transaction.args[0]["binary-url"], binary_url)
+
+    @patch("charm.utils")
     def test_combined_credential_and_version_change_commits_stored_state_after_transaction(self, mock_utils):
         mock_utils.get_version.return_value = "v31.0.0"
         mock_utils.bitcoind_binary_installed.return_value = True

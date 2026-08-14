@@ -32,6 +32,61 @@ def _version_output(value: str) -> mock.MagicMock:
     return mock.MagicMock(stdout=value)
 
 
+def test_install_release_uses_configured_binary_url(tmp_path):
+    payload = _release("31.0")
+    release, sums = _responses(payload)
+    binary_url = "https://downloads.example.test/releases/bitcoin-31.0-x86_64-linux-gnu.tar.gz"
+
+    with (
+        mock.patch("bitcoin.requests.get", side_effect=[release, sums]) as get,
+        mock.patch(
+            "bitcoin.sp.run",
+            return_value=mock.MagicMock(stdout="Bitcoin Core daemon version v31.0.0 bitcoind\n"),
+        ),
+    ):
+        bitcoin.install_release(
+            "31.0",
+            tmp_path / "bitcoind",
+            tmp_path / "bitcoin-cli",
+            binary_url=binary_url,
+            is_running=lambda: False,
+            stop=mock.Mock(),
+            start=mock.Mock(),
+            wait_for_running_version=mock.Mock(),
+        )
+
+    assert [call.args[0] for call in get.call_args_list] == [
+        binary_url,
+        "https://downloads.example.test/releases/SHA256SUMS",
+    ]
+
+
+@pytest.mark.parametrize(
+    "binary_url",
+    [
+        "http://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz",
+        "https://user:secret@downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz",
+        "https://downloads.example.test/bitcoin-30.0-x86_64-linux-gnu.tar.gz",
+        "https://downloads.example.test/bitcoin-31.0-x86_64-linux-gnu.tar.gz?token=secret",
+    ],
+)
+def test_install_release_rejects_unsafe_or_mismatched_binary_url_before_download(tmp_path, binary_url):
+    with mock.patch("bitcoin.requests.get") as get:
+        with pytest.raises(ValueError, match="binary-url"):
+            bitcoin.install_release(
+                "31.0",
+                tmp_path / "bitcoind",
+                tmp_path / "bitcoin-cli",
+                binary_url=binary_url,
+                is_running=lambda: False,
+                stop=mock.Mock(),
+                start=mock.Mock(),
+                wait_for_running_version=mock.Mock(),
+            )
+
+    get.assert_not_called()
+
+
 def test_install_release_validates_both_staged_binaries_before_stopping(tmp_path):
     payload = _release("31.0")
     release, sums = _responses(payload)

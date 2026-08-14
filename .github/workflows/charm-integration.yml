@@ -15,6 +15,14 @@ on:
         description: Different Bitcoin Core release used to test replacement
         required: true
         type: string
+      bitcoin_binary_url:
+        description: Exact initial Bitcoin Core amd64 archive URL
+        required: true
+        type: string
+      bitcoin_updated_binary_url:
+        description: Exact replacement Bitcoin Core amd64 archive URL
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +44,8 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           BITCOIN_VERSION: ${{ inputs.bitcoin_version }}
           BITCOIN_UPDATED_VERSION: ${{ inputs.bitcoin_updated_version }}
+          BITCOIN_BINARY_URL: ${{ inputs.bitcoin_binary_url }}
+          BITCOIN_UPDATED_BINARY_URL: ${{ inputs.bitcoin_updated_binary_url }}
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -43,6 +53,9 @@ jobs:
           test -n "$BITCOIN_VERSION"
           test -n "$BITCOIN_UPDATED_VERSION"
           test "$BITCOIN_VERSION" != "$BITCOIN_UPDATED_VERSION"
+          test -n "$BITCOIN_BINARY_URL"
+          test -n "$BITCOIN_UPDATED_BINARY_URL"
+          test "$BITCOIN_BINARY_URL" != "$BITCOIN_UPDATED_BINARY_URL"
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -60,6 +73,8 @@ jobs:
           CHARM_PATH: ${{ github.workspace }}/bitcoin-rpc_ubuntu@24.04-amd64.charm
           BITCOIN_VERSION: ${{ inputs.bitcoin_version }}
           BITCOIN_UPDATED_VERSION: ${{ inputs.bitcoin_updated_version }}
+          BITCOIN_BINARY_URL: ${{ inputs.bitcoin_binary_url }}
+          BITCOIN_UPDATED_BINARY_URL: ${{ inputs.bitcoin_updated_binary_url }}
         run: make integration-test
       - uses: actions/upload-artifact@v4
         with:

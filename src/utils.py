@@ -50,7 +50,7 @@ def create_user():
     chown()
 
 
-def install_bitcoin(version: str, config: Mapping[str, object]):
+def install_bitcoin(version: str, config: Mapping[str, object], *, binary_url: str = ""):
     """Install the bitcoind daemon and the bitcoin-cli RPC client.
 
     Both binaries come from the same release tarball: bitcoind runs as the node
@@ -64,6 +64,7 @@ def install_bitcoin(version: str, config: Mapping[str, object]):
         version,
         c.BINARY_PATH,
         c.CLI_PATH,
+        binary_url=binary_url,
         is_running=lambda: get_status(c.SERVICE_NAME),
         stop=stop_service,
         start=start_service,
@@ -295,8 +296,12 @@ def _activate_config_generation(
     proxy_changed: bool,
 ) -> None:
     """Activate one written generation and prove each prior service recovered."""
-    if "version" in changed_keys:
-        install_bitcoin(str(config.get("version") or ""), config)
+    if {"version", "binary-url"} & changed_keys:
+        install_bitcoin(
+            str(config.get("version") or ""),
+            config,
+            binary_url=str(config.get("binary-url") or ""),
+        )
     elif node_changed and snapshot.running[c.SERVICE_NAME]:
         restart_service()
         if wait_for_running_version(config) is None:
@@ -327,7 +332,9 @@ def apply_config_transaction(
         return
     snapshot = _capture_config_transaction()
     credentials_changed = bool({"rpc-user", "rpc-password"} & changed_keys)
-    node_changed = bool({"rpc-user", "rpc-password", "service-args", "disable-wallet", "version"} & changed_keys)
+    node_changed = bool(
+        {"rpc-user", "rpc-password", "service-args", "disable-wallet", "version", "binary-url"} & changed_keys
+    )
     proxy_changed = credentials_changed or bool(
         {
             "rpc-proxy-filter",

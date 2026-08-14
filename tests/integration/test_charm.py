@@ -10,6 +10,8 @@ APP = "bitcoin-rpc"
 UNIT = f"{APP}/0"
 VERSION = os.environ["BITCOIN_VERSION"]
 UPDATED_VERSION = os.environ["BITCOIN_UPDATED_VERSION"]
+BINARY_URL = os.environ["BITCOIN_BINARY_URL"]
+UPDATED_BINARY_URL = os.environ["BITCOIN_UPDATED_BINARY_URL"]
 REGTEST_GENESIS = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
 METADATA_PATH = "/tmp/dwellir-metadata-uploader/bitcoin-rpc-0.json"
 
@@ -54,6 +56,7 @@ def test_regtest_runtime_metadata_and_actions(charm: Path, juju: jubilant.Juju):
         base="ubuntu@24.04",
         config={
             "version": VERSION,
+            "binary-url": BINARY_URL,
             "rpc-user": "integration-user",
             "rpc-password": "integration-password",
             "service-args": (
@@ -230,7 +233,7 @@ def test_running_release_replacement_verifies_rpc_and_versions(juju: jubilant.Ju
     """A running replacement must expose the requested version through RPC."""
     before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
 
-    juju.config(APP, {"version": UPDATED_VERSION})
+    juju.config(APP, {"version": UPDATED_VERSION, "binary-url": UPDATED_BINARY_URL})
     _wait_active(juju)
 
     after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
@@ -253,10 +256,11 @@ def test_release_replacement_preserves_stopped_state(juju: jubilant.Juju):
     juju.run(UNIT, "stop-node", wait=300)
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
 
-    juju.config(APP, {"version": VERSION})
+    juju.config(APP, {"version": VERSION, "binary-url": BINARY_URL})
     completed = juju.run(UNIT, "print-event-log", wait=1800)
     assert completed.status == "completed"
     assert f"version={VERSION}" in completed.results["event-log"]
+    assert f"binary-url={BINARY_URL}" in completed.results["event-log"]
 
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
     assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")

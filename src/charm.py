@@ -36,6 +36,7 @@ _TRACKED_CONFIG = (
     ("rpc-password", "rpc_password"),
     ("service-args", "service_args"),
     ("version", "version"),
+    ("binary-url", "binary_url"),
     ("rpc-proxy-filter", "rpc_proxy_filter"),
     ("rpc-proxy-version", "rpc_proxy_version"),
     ("rpc-proxy-listen", "rpc_proxy_listen"),
@@ -88,6 +89,7 @@ class BitcoinCharm(ops.CharmBase):
             rpc_user=self.config.get("rpc-user"),
             service_args=self.config.get("service-args"),
             version=self.config.get("version"),
+            binary_url=self.config.get("binary-url"),
             rpc_proxy_filter=self.config.get("rpc-proxy-filter"),
             rpc_proxy_version=self.config.get("rpc-proxy-version"),
             rpc_proxy_listen=self.config.get("rpc-proxy-listen"),
@@ -182,7 +184,11 @@ class BitcoinCharm(ops.CharmBase):
 
     def _install_bitcoind(self, restart_service: bool = False):
         """Install the bitcoind client and service."""
-        utils.install_bitcoin(str(self.config.get("version") or ""), self.config)
+        utils.install_bitcoin(
+            str(self.config.get("version") or ""),
+            self.config,
+            binary_url=str(self.config.get("binary-url") or ""),
+        )
         utils.install_service_file(f"templates/{c.SERVICE_NAME}.service", c.SERVICE_NAME)
         utils.update_service_args(self.config, restart_service=restart_service)
 

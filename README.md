@@ -39,6 +39,8 @@ NOTE: pick your own RPC credentials; a strong password can be generated with e.g
 NOTE: do not pass `-rpcbind`, `-rpcallowip` or `-rpcport` in `service-args` — the charm strips them and pins `bitcoind`'s RPC to loopback on a fixed port, since the [RPC proxy](#rpc-proxy) is the node's only RPC front door. External access is configured via `rpc-proxy-listen` instead.
 
 - The `version` config is **required** and has no default. Without it the Bitcoin client is not installed and the unit stays blocked. Pick any released version from the [Bitcoin client index](https://bitcoincore.org/bin/), e.g. `--config version=31.0` as above.
+- `binary-url` selects an exact Bitcoin Core amd64 archive. Existing deployments can leave it empty. The charm then derives the official bitcoincore.org URL from `version`.
+- A configured `binary-url` must use HTTPS. It cannot contain credentials, a query, or a fragment. Its filename must match `version` exactly.
 - The `rpc-proxy-version` config defaults to a published release of this repository. The matching `v<version>` release with a `bitcoin-rpc-proxy` asset must exist on this repository's GitHub releases page, or the unit goes into `BlockedStatus` with `bitcoind` left loopback-only (see [RPC proxy](#rpc-proxy)).
 - The charm validates each Bitcoin Core archive against the release `SHA256SUMS` file. It also validates the staged binary version before activation.
 - Setting `-txindex=1` is optional, but recommended for full transaction indexing. This equals "archive mode" for other blockchains. If this is not set from deploy, one might need to run a reindex operation to make sure all transactions are indexed.
@@ -147,11 +149,15 @@ juju ssh bitcoin-rpc/0 -- sudo systemctl status bitcoind-monitor
 juju ssh bitcoin-rpc/0 -- sudo systemctl status bitcoin-rpc-proxy
 ```
 
-Upgrading the Bitcoin client is as easy as setting the `version` config to any released version:
+Upgrade with both the expected version and exact archive URL:
 
 ```bash
-juju config bitcoin-rpc version=31.0
+juju config bitcoin-rpc \
+  version=31.0 \
+  binary-url=https://bitcoincore.org/bin/bitcoin-core-31.0/bitcoin-31.0-x86_64-linux-gnu.tar.gz
 ```
+
+Legacy automation can continue setting only `version`. The charm then uses the matching official archive URL.
 
 The charm stages and validates both binaries before service interruption.
 It restores the previous binaries when activation fails.
@@ -281,6 +287,8 @@ It creates and destroys a temporary model through Jubilant.
 CHARM_PATH="$PWD/bitcoin-rpc_ubuntu@24.04-amd64.charm" \
 BITCOIN_VERSION=30.2 \
 BITCOIN_UPDATED_VERSION=31.0 \
+BITCOIN_BINARY_URL=https://bitcoincore.org/bin/bitcoin-core-30.2/bitcoin-30.2-x86_64-linux-gnu.tar.gz \
+BITCOIN_UPDATED_BINARY_URL=https://bitcoincore.org/bin/bitcoin-core-31.0/bitcoin-31.0-x86_64-linux-gnu.tar.gz \
 make integration-test
 ```
 
