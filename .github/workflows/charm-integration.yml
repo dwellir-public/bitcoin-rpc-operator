@@ -1,0 +1,88 @@
+name: Charm Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact commit to build and test
+        required: true
+        type: string
+      bitcoin_version:
+        description: Initial Bitcoin Core release for the integration test
+        required: true
+        type: string
+      bitcoin_updated_version:
+        description: Different Bitcoin Core release used to test replacement
+        required: true
+        type: string
+      bitcoin_binary_url:
+        description: Exact initial Bitcoin Core amd64 archive URL
+        required: true
+        type: string
+      bitcoin_updated_binary_url:
+        description: Exact replacement Bitcoin Core amd64 archive URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    if: >-
+      github.repository == 'dwellir-public/bitcoin-rpc-operator' &&
+      github.ref == 'refs/heads/main' &&
+      github.sha == inputs.source_sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Verify exact source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BITCOIN_VERSION: ${{ inputs.bitcoin_version }}
+          BITCOIN_UPDATED_VERSION: ${{ inputs.bitcoin_updated_version }}
+          BITCOIN_BINARY_URL: ${{ inputs.bitcoin_binary_url }}
+          BITCOIN_UPDATED_BINARY_URL: ${{ inputs.bitcoin_updated_binary_url }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -n "$BITCOIN_VERSION"
+          test -n "$BITCOIN_UPDATED_VERSION"
+          test "$BITCOIN_VERSION" != "$BITCOIN_UPDATED_VERSION"
+          test -n "$BITCOIN_BINARY_URL"
+          test -n "$BITCOIN_UPDATED_BINARY_URL"
+          test "$BITCOIN_BINARY_URL" != "$BITCOIN_UPDATED_BINARY_URL"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: canonical/setup-lxd@v1
+      - name: Install Juju and Charmcraft
+        run: |
+          sudo snap install juju --channel=3.6/stable --classic
+          sudo snap install charmcraft --classic
+          sudo snap install astral-uv --classic
+      - run: juju bootstrap localhost
+      - run: charmcraft pack --destructive-mode --platform=ubuntu@24.04:amd64
+      - name: Run the required integration matrix
+        env:
+          CHARM_PATH: ${{ github.workspace }}/bitcoin-rpc_ubuntu@24.04-amd64.charm
+          BITCOIN_VERSION: ${{ inputs.bitcoin_version }}
+          BITCOIN_UPDATED_VERSION: ${{ inputs.bitcoin_updated_version }}
+          BITCOIN_BINARY_URL: ${{ inputs.bitcoin_binary_url }}
+          BITCOIN_UPDATED_BINARY_URL: ${{ inputs.bitcoin_updated_binary_url }}
+        run: make integration-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-charm-${{ inputs.source_sha }}
+          path: bitcoin-rpc_ubuntu@24.04-amd64.charm
+          if-no-files-found: error
+      - name: Diagnostics
+        if: always()
+        run: |
+          juju models || true
+          juju status --relations || true

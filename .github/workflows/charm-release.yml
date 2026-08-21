@@ -1,0 +1,162 @@
+name: Release Tested Charm
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact tested commit on main
+        required: true
+        type: string
+      integration_run_id:
+        description: Successful Charm Integration workflow run ID
+        required: true
+        type: string
+      artifact_sha256:
+        description: SHA-256 of the tested charm artifact
+        required: true
+        type: string
+      channel:
+        description: Charmhub release channel
+        required: true
+        default: latest/edge
+        type: choice
+        options:
+          - latest/edge
+          - latest/beta
+          - latest/candidate
+          - latest/stable
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'dwellir-public/bitcoin-rpc-operator' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: charmhub-release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify source provenance
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch origin main --tags
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+      - name: Verify unified VERSION, changelog, tag, and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          version=${version#v}
+          tag="v${version}"
+          tag_commit=$(git rev-parse "${tag}^{commit}")
+          gh release view "$tag" --json tagName,isDraft,isPrerelease > unified-release.json
+          verified_tag=$(python3 .github/scripts/verify_unified_release.py \
+            --source-sha "$SOURCE_SHA" \
+            --tag-commit "$tag_commit" \
+            --version-file VERSION \
+            --changelog-file CHANGELOG.md \
+            < unified-release.json)
+          test "$verified_tag" = "$tag"
+          echo "RELEASE_TAG=$verified_tag" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - name: Re-run source tests
+        run: make charm-test
+      - name: Verify integration run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTEGRATION_RUN_ID: ${{ inputs.integration_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$INTEGRATION_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$INTEGRATION_RUN_ID" > integration-run.json
+          python3 .github/scripts/verify_integration_run.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$INTEGRATION_RUN_ID" \
+            --source-sha "$SOURCE_SHA" \
+            --workflow-path .github/workflows/charm-integration.yml \
+            < integration-run.json
+      - name: Download exact integration-tested artifact
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.integration_run_id }}
+          name: tested-charm-${{ inputs.source_sha }}
+          path: release-artifact
+      - name: Verify artifact digest
+        env:
+          EXPECTED_SHA256: ${{ inputs.artifact_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(find release-artifact -maxdepth 1 -name '*.charm' -type f | wc -l)" = 1
+          artifact=$(find release-artifact -maxdepth 1 -name '*.charm' -type f)
+          echo "$EXPECTED_SHA256  $artifact" | sha256sum --check --strict
+      - name: Install Charmcraft
+        run: sudo snap install charmcraft --classic
+      - name: Upload exact artifact
+        id: upload
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          artifact=$(find release-artifact -maxdepth 1 -name '*.charm' -type f)
+          output=$(charmcraft upload --format=json "$artifact")
+          revision=$(python3 -c 'import json,sys; value=json.load(sys.stdin).get("revision"); isinstance(value,int) and value > 0 or sys.exit("Charmcraft upload JSON has no positive integer revision"); print(value)' <<<"$output")
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+      - name: Attach exact artifact and provenance to unified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ steps.upload.outputs.revision }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CHANNEL: ${{ inputs.channel }}
+          EXPECTED_SHA256: ${{ inputs.artifact_sha256 }}
+          ARTIFACT: ${{ steps.upload.outputs.artifact }}
+          INTEGRATION_RUN_ID: ${{ inputs.integration_run_id }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/write_charm_provenance.py \
+            --artifact "$ARTIFACT" \
+            --artifact-sha256 "$EXPECTED_SHA256" \
+            --channel "$CHANNEL" \
+            --revision "$REVISION" \
+            --integration-run-id "$INTEGRATION_RUN_ID" \
+            --release-tag "$RELEASE_TAG" \
+            --source-sha "$SOURCE_SHA" \
+            --output bitcoin-rpc-charm-provenance.json
+          gh release upload "$RELEASE_TAG" "$ARTIFACT" bitcoin-rpc-charm-provenance.json --clobber
+      - name: Release exact revision
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          REVISION: ${{ steps.upload.outputs.revision }}
+          CHANNEL: ${{ inputs.channel }}
+        run: charmcraft release bitcoin-rpc --revision "$REVISION" --channel "$CHANNEL"
+      - name: Verify published revision
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          REVISION: ${{ steps.upload.outputs.revision }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          charmcraft status bitcoin-rpc --format=json > charmhub-status.json
+          python3 .github/scripts/verify_charmhub_release.py \
+            --revision "$REVISION" \
+            --channel "$CHANNEL" \
+            --base-name ubuntu \
+            --base-channel 24.04 \
+            --architecture amd64 \
+            < charmhub-status.json

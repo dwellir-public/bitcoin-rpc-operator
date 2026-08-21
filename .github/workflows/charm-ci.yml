@@ -1,5 +1,8 @@
 name: Charm CI
 
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 # Python/tox lane for the charm itself, separate from the Go rpc-proxy lane.
 # Scoped to exclude proxy-only changes so they don't trigger it.
 on:
@@ -14,43 +17,45 @@ on:
       - '.github/workflows/rpc-proxy-*.yml'
 
 jobs:
-  lint:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+  charm-tests:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Record exact source commit
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e lint
+      - uses: astral-sh/setup-uv@v6
+      - run: make charm-test
 
-  static:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+  exact-artifact:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e static
-
-  unit-tests:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+          fetch-depth: 0
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Record exact source commit
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo snap install charmcraft --classic
+      - run: sudo charmcraft pack --quiet --destructive-mode --platform ubuntu@24.04:amd64
+      - name: Verify packed dispatch across Python minor drift
+        run: uv run python tests/verify_artifact_dispatch.py bitcoin-rpc_ubuntu@24.04-amd64.charm
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: '3.12'
-          cache: pip
-      - run: pip install tox
-      - run: tox run -e unit
+          name: bitcoin-rpc-charm-${{ env.SOURCE_SHA }}
+          path: bitcoin-rpc_ubuntu@24.04-amd64.charm
+          if-no-files-found: error
 
   summary:
     name: CI Summary
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [lint, static, unit-tests]
+    runs-on: ubuntu-24.04
+    needs: [charm-tests, exact-artifact]
     if: always() # Always run, even if earlier jobs fail
     steps:
       - name: Write CI summary
@@ -58,9 +63,8 @@ jobs:
           {
             echo "## Charm CI Summary"
             echo ""
-            echo "- **Lint:**   ${{ needs.lint.result }}"
-            echo "- **Static:** ${{ needs.static.result }}"
-            echo "- **Unit:**   ${{ needs.unit-tests.result }}"
+            echo "- **Charm tests:** ${{ needs.charm-tests.result }}"
+            echo "- **Exact artifact:** ${{ needs.exact-artifact.result }}"
             echo ""
             echo "### Commit"
             echo "[${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"

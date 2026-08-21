@@ -9,14 +9,29 @@ import shutil
 import subprocess as sp
 import tempfile
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import ops
 import requests
 
+import bitcoin
 import constants as c
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _FileState:
+    data: bytes | None
+    mode: int | None
+
+
+@dataclass(frozen=True)
+class _ConfigTransactionSnapshot:
+    files: dict[Path, _FileState]
+    running: dict[str, bool]
 
 
 # CONFIG AND INSTALLATION
@@ -35,7 +50,7 @@ def create_user():
     chown()
 
 
-def install_bitcoin(version: str):
+def install_bitcoin(version: str, config: Mapping[str, object], *, binary_url: str = ""):
     """Install the bitcoind daemon and the bitcoin-cli RPC client.
 
     Both binaries come from the same release tarball: bitcoind runs as the node
@@ -45,21 +60,18 @@ def install_bitcoin(version: str):
     A no-op when version is empty (the config default), so a deploy without
     `version` set lands in BlockedStatus instead of erroring the install hook.
     """
+    bitcoin.install_release(
+        version,
+        c.BINARY_PATH,
+        c.CLI_PATH,
+        binary_url=binary_url,
+        is_running=lambda: get_status(c.SERVICE_NAME),
+        stop=stop_service,
+        start=start_service,
+        wait_for_running_version=lambda: wait_for_running_version(config),
+    )
     if not version:
-        logger.info("No version set; skipping bitcoind download.")
         return
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        url = c.DL_URL.replace("VERSION", version)
-        response = requests.get(url, timeout=600)
-        response.raise_for_status()
-        tarball = Path(tmp_dir) / url.split("/")[-1]
-        tarball.write_bytes(response.content)
-        sp.run(["tar", "-xzf", str(tarball)], cwd=tmp_dir, check=True)
-        bin_dir = Path(tmp_dir) / f"bitcoin-{version}" / "bin"
-        for name, dest in ((c.BINARY_NAME, c.BINARY_PATH), (c.CLI_NAME, c.CLI_PATH)):
-            sp.run(["cp", bin_dir / name, dest], check=True)
-            sp.run(["chmod", "+x", dest], check=True)
-
     chown()
 
 
@@ -77,9 +89,23 @@ def install_dependencies() -> None:
     logger.info("Installing monitor dependencies into a venv.")
     c.MONITOR_DIR.mkdir(parents=True, exist_ok=True)
     sp.run(["python3", "-m", "venv", str(c.MONITOR_VENV_DIR)], check=True)
-    command = [str(c.MONITOR_VENV_PIP), "install"]
-    command.extend(c.PIP_PACKAGES)
-    sp.run(command, check=True)
+    monitor_env = os.environ.copy()
+    monitor_env.pop("PYTHONPATH", None)
+    for package in c.PIP_PACKAGES:
+        sp.run(
+            [str(c.MONITOR_VENV_PIP), "install", "--no-deps", package],
+            check=True,
+            env=monitor_env,
+        )
+    sp.run(
+        [
+            str(c.MONITOR_VENV_DIR / "bin" / "python"),
+            "-c",
+            "import bitcoin, prometheus_client, riprova, six",
+        ],
+        check=True,
+        env=monitor_env,
+    )
     chown()
 
 
@@ -148,6 +174,211 @@ def install_rpc_proxy_service(config: ops.ConfigData, restart_service: bool) -> 
         restart_rpc_proxy()
 
 
+def _transaction_paths() -> tuple[Path, ...]:
+    """Return every file a config transaction can replace."""
+    return (
+        c.BINARY_PATH,
+        c.CLI_PATH,
+        c.RPC_PROXY_BINARY_PATH,
+        Path(f"/etc/default/{c.SERVICE_NAME}"),
+        Path(f"/etc/default/{c.MONITOR_SERVICE_NAME}"),
+        Path(f"/etc/default/{c.RPC_PROXY_SERVICE_NAME}"),
+        c.MONITOR_SCRIPT_PATH,
+        Path(f"/etc/systemd/system/{c.SERVICE_NAME}.service"),
+        Path(f"/etc/systemd/system/{c.MONITOR_SERVICE_NAME}.service"),
+        Path(f"/etc/systemd/system/{c.RPC_PROXY_SERVICE_NAME}.service"),
+    )
+
+
+def _capture_config_transaction() -> _ConfigTransactionSnapshot:
+    files = {
+        path: _FileState(
+            data=path.read_bytes() if path.exists() else None,
+            mode=(path.stat().st_mode & 0o7777) if path.exists() else None,
+        )
+        for path in _transaction_paths()
+    }
+    running = {
+        service: get_status(service) for service in (c.SERVICE_NAME, c.MONITOR_SERVICE_NAME, c.RPC_PROXY_SERVICE_NAME)
+    }
+    return _ConfigTransactionSnapshot(files=files, running=running)
+
+
+def _restore_file(path: Path, state: _FileState) -> None:
+    if state.data is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.rollback-")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(state.data)
+        if state.mode is not None:
+            os.chmod(temporary, state.mode)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _restored_service_errors(snapshot: _ConfigTransactionSnapshot, previous_config: Mapping[str, object]) -> list[str]:
+    """Return readiness errors for services that ran before the transaction."""
+    errors = []
+    if snapshot.running[c.SERVICE_NAME]:
+        try:
+            if wait_for_running_version(previous_config) is None:
+                errors.append("node readiness: Bitcoin Core RPC did not recover")
+        except BaseException as exc:
+            errors.append(f"node readiness: {exc}")
+    for service, name in (
+        (c.MONITOR_SERVICE_NAME, "monitor readiness"),
+        (c.RPC_PROXY_SERVICE_NAME, "proxy readiness"),
+    ):
+        if snapshot.running[service] and not service_running(service):
+            errors.append(f"{name}: service did not recover")
+    return errors
+
+
+def _rollback_config_transaction(
+    snapshot: _ConfigTransactionSnapshot,
+    cause: BaseException,
+    previous_config: Mapping[str, object],
+) -> None:
+    errors = []
+    operations = (
+        ("stop proxy", stop_rpc_proxy),
+        ("stop monitor", stop_monitor),
+        ("stop node", stop_service),
+    )
+    for name, operation in operations:
+        try:
+            operation()
+        except BaseException as exc:
+            errors.append(f"{name}: {exc}")
+    for path, state in snapshot.files.items():
+        try:
+            _restore_file(path, state)
+        except BaseException as exc:
+            errors.append(f"restore {path.name}: {exc}")
+    try:
+        sp.run(["systemctl", "daemon-reload"], check=True)
+    except BaseException as exc:
+        errors.append(f"daemon-reload: {exc}")
+    starts = (
+        (c.SERVICE_NAME, "start node", start_service),
+        (c.MONITOR_SERVICE_NAME, "start monitor", start_monitor),
+        (c.RPC_PROXY_SERVICE_NAME, "start proxy", start_rpc_proxy),
+    )
+    for service, name, operation in starts:
+        if not snapshot.running[service]:
+            continue
+        try:
+            operation()
+        except BaseException as exc:
+            errors.append(f"{name}: {exc}")
+    errors.extend(_restored_service_errors(snapshot, previous_config))
+    if errors:
+        raise RuntimeError(f"config rollback failed ({'; '.join(errors)})") from cause
+
+
+def _write_config_generation(
+    config: Mapping[str, object],
+    changed_keys: set[str],
+    *,
+    credentials_changed: bool,
+    node_changed: bool,
+    proxy_changed: bool,
+) -> None:
+    """Write one internally consistent set of managed files."""
+    if "rpc-proxy-version" in changed_keys:
+        install_rpc_proxy(str(config.get("rpc-proxy-version") or ""))
+    if node_changed:
+        update_service_args(config, restart_service=False)  # type: ignore[arg-type]
+    if credentials_changed:
+        install_bitcoind_monitor(config, restart_service=False)  # type: ignore[arg-type]
+    if proxy_changed:
+        install_rpc_proxy_service(config, restart_service=False)  # type: ignore[arg-type]
+
+
+def _activate_config_generation(
+    config: Mapping[str, object],
+    changed_keys: set[str],
+    snapshot: _ConfigTransactionSnapshot,
+    *,
+    credentials_changed: bool,
+    node_changed: bool,
+    proxy_changed: bool,
+) -> None:
+    """Activate one written generation and prove each prior service recovered."""
+    if {"version", "binary-url"} & changed_keys:
+        install_bitcoin(
+            str(config.get("version") or ""),
+            config,
+            binary_url=str(config.get("binary-url") or ""),
+        )
+    elif node_changed and snapshot.running[c.SERVICE_NAME]:
+        restart_service()
+        if wait_for_running_version(config) is None:
+            raise RuntimeError("Bitcoin Core did not become RPC-ready after config change")
+
+    if credentials_changed and snapshot.running[c.MONITOR_SERVICE_NAME]:
+        restart_monitor()
+        if not service_running(c.MONITOR_SERVICE_NAME):
+            raise RuntimeError("bitcoind monitor did not become ready after config change")
+    if proxy_changed and snapshot.running[c.RPC_PROXY_SERVICE_NAME]:
+        if not rpc_proxy_binary_installed():
+            raise RuntimeError("RPC proxy binary is missing after config change")
+        restart_rpc_proxy()
+        if not service_running(c.RPC_PROXY_SERVICE_NAME):
+            raise RuntimeError("RPC proxy did not become ready after config change")
+    if snapshot.running[c.SERVICE_NAME] and not service_running(c.SERVICE_NAME):
+        raise RuntimeError("Bitcoin Core did not remain running after config change")
+
+
+def apply_config_transaction(
+    config: Mapping[str, object],
+    *,
+    previous_config: Mapping[str, object],
+    changed_keys: set[str],
+) -> None:
+    """Apply one config generation and restore every managed file on failure."""
+    if not changed_keys:
+        return
+    snapshot = _capture_config_transaction()
+    credentials_changed = bool({"rpc-user", "rpc-password"} & changed_keys)
+    node_changed = bool(
+        {"rpc-user", "rpc-password", "service-args", "disable-wallet", "version", "binary-url"} & changed_keys
+    )
+    proxy_changed = credentials_changed or bool(
+        {
+            "rpc-proxy-filter",
+            "rpc-proxy-version",
+            "rpc-proxy-listen",
+            "rpc-proxy-extend-allowlist",
+        }
+        & changed_keys
+    )
+    try:
+        _write_config_generation(
+            config,
+            changed_keys,
+            credentials_changed=credentials_changed,
+            node_changed=node_changed,
+            proxy_changed=proxy_changed,
+        )
+        _activate_config_generation(
+            config,
+            changed_keys,
+            snapshot,
+            credentials_changed=credentials_changed,
+            node_changed=node_changed,
+            proxy_changed=proxy_changed,
+        )
+    except BaseException as exc:
+        _rollback_config_transaction(snapshot, exc, previous_config)
+        raise
+
+
 # SERVICES
 
 
@@ -161,47 +392,47 @@ def get_status(service_name: str = c.SERVICE_NAME) -> bool:
 
 def restart_service():
     """Restart the bitcoind service."""
-    sp.run(["systemctl", "restart", c.SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.SERVICE_NAME], check=True)
 
 
 def start_service():
     """Start the bitcoind service."""
-    sp.run(["systemctl", "start", c.SERVICE_NAME])
+    sp.run(["systemctl", "start", c.SERVICE_NAME], check=True)
 
 
 def stop_service():
     """Stop the bitcoind service."""
-    sp.run(["systemctl", "stop", c.SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.SERVICE_NAME], check=True)
 
 
 def restart_monitor():
     """Restart the bitcoind monitor service."""
-    sp.run(["systemctl", "restart", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def start_monitor():
     """Start the bitcoind monitor service."""
-    sp.run(["systemctl", "start", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "start", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def stop_monitor():
     """Stop the bitcoind monitor service."""
-    sp.run(["systemctl", "stop", c.MONITOR_SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.MONITOR_SERVICE_NAME], check=True)
 
 
 def restart_rpc_proxy():
     """Restart the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "restart", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "restart", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def start_rpc_proxy():
     """Start the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "start", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "start", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def stop_rpc_proxy():
     """Stop the bitcoin-rpc-proxy service."""
-    sp.run(["systemctl", "stop", c.RPC_PROXY_SERVICE_NAME])
+    sp.run(["systemctl", "stop", c.RPC_PROXY_SERVICE_NAME], check=True)
 
 
 def service_running(service_name: str, iterations: int = 4) -> bool:
@@ -211,6 +442,30 @@ def service_running(service_name: str, iterations: int = 4) -> bool:
             return True
         time.sleep(1)
     return False
+
+
+def wait_for_running_version(config: Mapping[str, object], attempts: int = 30, interval: float = 2.0) -> str | None:
+    """Poll loopback JSON-RPC and return the running client's version."""
+    for attempt in range(attempts):
+        try:
+            response = requests.post(
+                f"http://127.0.0.1:{c.BITCOIND_RPC_PORT}",
+                auth=(str(config.get("rpc-user") or ""), str(config.get("rpc-password") or "")),
+                json={"jsonrpc": "2.0", "id": "activation", "method": "getnetworkinfo", "params": []},
+                timeout=5,
+            )
+            response.raise_for_status()
+            body = response.json()
+            result = body.get("result") if isinstance(body, dict) and not body.get("error") else None
+            subversion = result.get("subversion") if isinstance(result, dict) else None
+            match = re.search(r"Satoshi:([^/]+)/?", str(subversion or ""))
+            if match:
+                return match.group(1)
+        except (requests.RequestException, TypeError, ValueError):
+            logger.debug("Bitcoin Core RPC is not ready during binary activation")
+        if attempt + 1 < attempts:
+            time.sleep(interval)
+    return None
 
 
 def update_service_args(config: ops.ConfigData, restart_service: bool) -> bool:
@@ -381,6 +636,47 @@ def get_disk_usage(*paths: Path) -> str:
     if disk_usages:
         return ", ".join(f"{path}: {size}" for path, size in disk_usages)
     return "error parsing disk usage"
+
+
+def _finite_int(value: str) -> int | None:
+    if value.casefold() == "infinity":
+        return None
+    parsed = int(value)
+    return None if parsed >= 2**63 else parsed
+
+
+def _timespan_microseconds(value: str) -> float | None:
+    if value.casefold() == "infinity":
+        return None
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(us|ms|s|min|h)?", value)
+    if match is None:
+        return None
+    multipliers = {None: 1.0, "us": 1.0, "ms": 1_000.0, "s": 1_000_000.0, "min": 60_000_000.0, "h": 3_600_000_000.0}
+    return float(match.group(1)) * multipliers[match.group(2)]
+
+
+def get_systemd_limits(service_name: str) -> dict[str, int | float | None]:
+    """Return normalized systemd resource limits for a workload service."""
+    result = sp.run(
+        [
+            "systemctl",
+            "show",
+            service_name,
+            "--property=MemoryMax,MemoryHigh,CPUQuotaPerSecUSec,TasksMax",
+            "--no-pager",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    quota_us = _timespan_microseconds(values.get("CPUQuotaPerSecUSec", "infinity"))
+    return {
+        "memory_max_bytes": _finite_int(values.get("MemoryMax", "infinity")),
+        "memory_high_bytes": _finite_int(values.get("MemoryHigh", "infinity")),
+        "cpu_quota_percent": None if quota_us is None else quota_us / 10_000.0,
+        "tasks_max": _finite_int(values.get("TasksMax", "infinity")),
+    }
 
 
 def get_readme() -> str:

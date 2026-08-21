@@ -29,7 +29,9 @@ platforms:
 parts:
   bitcoin-rpc-charm:
     source: .
-    plugin: charm
+    plugin: uv
+    build-snaps:
+      - astral-uv
     build-packages:
       - git
     # Stamp the charm's release tag + commit into a `charm_version` file that
@@ -37,9 +39,23 @@ parts:
     # the VERSION tag if .git isn't present in the build sandbox.
     override-build: |
       craftctl default
-      git -C "$CRAFT_PART_SRC" describe --tags --always 2>/dev/null \
+      git -c safe.directory="$CRAFT_PROJECT_DIR" -C "$CRAFT_PROJECT_DIR" describe --tags --always 2>/dev/null \
         > "$CRAFT_PART_INSTALL/charm_version" \
         || cat "$CRAFT_PART_SRC/VERSION" > "$CRAFT_PART_INSTALL/charm_version"
+  dispatch:
+    plugin: nil
+    source: .
+    after:
+      - bitcoin-rpc-charm
+    override-build: |
+      install -Dm755 dispatch "$CRAFT_PART_INSTALL/dispatch"
+  root-files:
+    plugin: dump
+    source: .
+    stage:
+      - README.md
+      - VERSION
+      - templates/**
 
 provides:
   node-prometheus:
@@ -74,7 +90,22 @@ config:
     version:
       type: string
       description: |
-        The version of the Bitcoin client to install.
+        The Bitcoin Core version to install and verify. Existing deployments can
+        leave binary-url empty to use the matching bitcoincore.org release.
+      default: ""
+    binary-url:
+      type: string
+      description: |
+        Optional exact Bitcoin Core amd64 archive URL. It must use HTTPS, contain
+        no credentials, query, or fragment, and match the configured version.
+        The charm verifies the archive against the sibling SHA256SUMS file.
+      default: ""
+    collector-s3-credentials:
+      type: secret
+      description: |
+        Juju secret reference for the S3-compatible Hedgehog metadata target.
+        The secret must contain bucket, region, access-key-id, and secret-access-key.
+        endpoint-url, key-prefix, and session-token are optional.
       default: ""
     rpc-proxy-filter:
       type: boolean

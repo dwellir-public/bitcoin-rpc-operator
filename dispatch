@@ -1,0 +1,22 @@
+#!/bin/sh
+
+dispatch_path="$(dirname "$(realpath "$0")")"
+python_path="${dispatch_path}/venv/bin/python"
+
+if [ ! -e "${python_path}" ]; then
+    python_path="$(command -v python3)"
+fi
+
+python_version="$(${python_path} -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+site_packages="${dispatch_path}/venv/lib/python${python_version}/site-packages"
+
+if [ ! -d "${site_packages}" ]; then
+    site_packages="$({
+        find "${dispatch_path}/venv/lib" -mindepth 2 -maxdepth 2 -type d -name site-packages
+    } | sort | head -n 1)"
+fi
+
+export PYTHONPATH="${site_packages}:${dispatch_path}/lib:${dispatch_path}/src"
+export LD_LIBRARY_PATH="${dispatch_path}/usr/lib:${dispatch_path}/lib:${dispatch_path}/usr/lib/$(uname -m)-linux-gnu"
+
+exec "${python_path}" "${dispatch_path}/src/charm.py"

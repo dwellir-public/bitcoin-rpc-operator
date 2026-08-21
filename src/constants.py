@@ -110,4 +110,5 @@ PIP_PACKAGES = [
     "prometheus_client==0.25.0",  # For Bitcoind Monitor
     "python-bitcoinlib==0.12.2",  # For Bitcoind Monitor
     "riprova==0.3.1",  # For Bitcoind Monitor
+    "six==1.17.0",  # Runtime dependency imported by riprova
 ]
