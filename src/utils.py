@@ -89,8 +89,14 @@ def install_dependencies() -> None:
     logger.info("Installing monitor dependencies into a venv.")
     c.MONITOR_DIR.mkdir(parents=True, exist_ok=True)
     sp.run(["python3", "-m", "venv", str(c.MONITOR_VENV_DIR)], check=True)
+    monitor_env = os.environ.copy()
+    monitor_env.pop("PYTHONPATH", None)
     for package in c.PIP_PACKAGES:
-        sp.run([str(c.MONITOR_VENV_PIP), "install", "--no-deps", package], check=True)
+        sp.run(
+            [str(c.MONITOR_VENV_PIP), "install", "--no-deps", package],
+            check=True,
+            env=monitor_env,
+        )
     sp.run(
         [
             str(c.MONITOR_VENV_DIR / "bin" / "python"),
@@ -98,6 +104,7 @@ def install_dependencies() -> None:
             "import bitcoin, prometheus_client, riprova, six",
         ],
         check=True,
+        env=monitor_env,
     )
     chown()
 

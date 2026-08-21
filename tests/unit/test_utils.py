@@ -11,7 +11,8 @@ import utils
 # install_dependencies
 
 
-def test_install_dependencies_installs_apt_then_pinned_venv():
+def test_install_dependencies_installs_apt_then_pinned_venv(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/charm/venv")
     with (
         mock.patch("utils.sp.run") as run,
         mock.patch("utils.chown") as chown,
@@ -35,6 +36,8 @@ def test_install_dependencies_installs_apt_then_pinned_venv():
         "-c",
         "import bitcoin, prometheus_client, riprova, six",
     ]
+    for call in run.call_args_list[3:]:
+        assert "PYTHONPATH" not in call.kwargs["env"]
 
     mkdir.assert_called_once()
     chown.assert_called_once()
