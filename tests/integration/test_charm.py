@@ -247,7 +247,7 @@ def test_running_release_replacement_verifies_rpc_and_versions(juju: jubilant.Ju
     network = json.loads(
         juju.ssh(
             UNIT,
-            "sudo /home/bitcoin/bitcoin-cli -regtest -rpcuser=integration-user "
+            "sudo /home/bitcoin/bitcoin-cli -regtest -rpcport=8332 -rpcuser=integration-user "
             "-rpcpassword=integration-password getnetworkinfo",
         )
     )
