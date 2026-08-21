@@ -20,17 +20,21 @@ def test_install_dependencies_installs_apt_then_pinned_venv():
         utils.install_dependencies()
 
     cmds = [call.args[0] for call in run.call_args_list]
-    # apt update, apt install, venv creation, then pip install -- in order.
+    # apt update, apt install, venv creation, then pinned pip installs -- in order.
     assert cmds[0] == ["apt", "update"]
     assert cmds[1][:3] == ["apt", "install", "-y"]
     assert "python3-venv" in cmds[1]
     assert cmds[2] == ["python3", "-m", "venv", str(c.MONITOR_VENV_DIR)]
 
-    pip_cmd = cmds[3]
-    assert pip_cmd[:2] == [str(c.MONITOR_VENV_PIP), "install"]
-    # Dependencies must be installed into the venv pip, version-pinned.
-    assert pip_cmd[2:] == c.PIP_PACKAGES
-    assert all("==" in pkg for pkg in pip_cmd[2:])
+    pip_cmds = cmds[3:-1]
+    assert [cmd[:3] for cmd in pip_cmds] == [[str(c.MONITOR_VENV_PIP), "install", "--no-deps"] for _ in c.PIP_PACKAGES]
+    assert [cmd[3] for cmd in pip_cmds] == c.PIP_PACKAGES
+    assert all("==" in cmd[3] for cmd in pip_cmds)
+    assert cmds[-1] == [
+        str(c.MONITOR_VENV_DIR / "bin" / "python"),
+        "-c",
+        "import bitcoin, prometheus_client, riprova, six",
+    ]
 
     mkdir.assert_called_once()
     chown.assert_called_once()

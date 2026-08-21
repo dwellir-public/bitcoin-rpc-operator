@@ -99,7 +99,7 @@ def test_regtest_runtime_metadata_and_actions(charm: Path, juju: jubilant.Juju):
     info = juju.run(UNIT, "get-node-info", wait=300)
     assert info.status == "completed"
     assert "integration-password" not in json.dumps(info.results)
-    assert info.results["rpc-proxy-running"] is True
+    assert info.results["rpc-proxy-running"] == "True"
 
     assert juju.run(UNIT, "stop-node", wait=300).status == "completed"
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
@@ -120,13 +120,13 @@ def test_regtest_runtime_metadata_and_actions(charm: Path, juju: jubilant.Juju):
 
 def test_upgrade_hook_is_metadata_only(charm: Path, juju: jubilant.Juju):
     """Refreshing the same artifact must not replace or restart the workload."""
-    before_hash = juju.ssh(UNIT, "sha256sum /home/bitcoin/bitcoind").split()[0]
+    before_hash = juju.ssh(UNIT, "sudo sha256sum /home/bitcoin/bitcoind").split()[0]
     before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
 
     juju.refresh(APP, path=charm)
     _wait_active(juju)
 
-    after_hash = juju.ssh(UNIT, "sha256sum /home/bitcoin/bitcoind").split()[0]
+    after_hash = juju.ssh(UNIT, "sudo sha256sum /home/bitcoin/bitcoind").split()[0]
     after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
     assert after_hash == before_hash
     assert after_pid == before_pid
@@ -238,12 +238,12 @@ def test_running_release_replacement_verifies_rpc_and_versions(juju: jubilant.Ju
 
     after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
     assert after_pid != before_pid
-    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")
-    assert UPDATED_VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoin-cli --version")
+    assert UPDATED_VERSION in juju.ssh(UNIT, "sudo /home/bitcoin/bitcoind --version")
+    assert UPDATED_VERSION in juju.ssh(UNIT, "sudo /home/bitcoin/bitcoin-cli --version")
     network = json.loads(
         juju.ssh(
             UNIT,
-            "/home/bitcoin/bitcoin-cli -regtest -rpcuser=integration-user "
+            "sudo /home/bitcoin/bitcoin-cli -regtest -rpcuser=integration-user "
             "-rpcpassword=integration-password getnetworkinfo",
         )
     )
@@ -263,5 +263,5 @@ def test_release_replacement_preserves_stopped_state(juju: jubilant.Juju):
     assert f"binary-url={BINARY_URL}" in completed.results["event-log"]
 
     assert juju.ssh(UNIT, "systemctl is-active bitcoind || true").strip() == "inactive"
-    assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoind --version")
-    assert VERSION in juju.ssh(UNIT, "/home/bitcoin/bitcoin-cli --version")
+    assert VERSION in juju.ssh(UNIT, "sudo /home/bitcoin/bitcoind --version")
+    assert VERSION in juju.ssh(UNIT, "sudo /home/bitcoin/bitcoin-cli --version")
