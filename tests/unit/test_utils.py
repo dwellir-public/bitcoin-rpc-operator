@@ -36,6 +36,11 @@ def test_install_dependencies_installs_apt_then_pinned_venv():
     chown.assert_called_once()
 
 
+def test_monitor_dependencies_pin_riprova_runtime_dependency():
+    """The monitor must install the dependency that riprova imports at startup."""
+    assert "six==1.17.0" in c.PIP_PACKAGES
+
+
 def test_install_dependencies_does_not_use_system_pip():
     # PEP 668: a bare `pip install` into the system Python fails on Ubuntu 24.04.
     with (

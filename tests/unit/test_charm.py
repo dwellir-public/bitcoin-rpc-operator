@@ -61,6 +61,24 @@ class TestCharm(unittest.TestCase):
 
     @patch("charm.bitcoin_metadata.collect_upload_metadata")
     @patch("charm.utils")
+    def test_update_status_waits_for_rpc_before_collecting_metadata(self, mock_utils, collect_metadata):
+        mock_utils.get_version.return_value = "v31.1.0"
+        mock_utils.bitcoind_binary_installed.return_value = True
+        mock_utils.rpc_proxy_binary_installed.return_value = True
+        mock_utils.service_running.return_value = True
+        mock_utils.wait_for_running_version.return_value = None
+
+        self.harness.charm._update_status()
+
+        mock_utils.wait_for_running_version.assert_called_once_with(self.harness.charm.config)
+        collect_metadata.assert_not_called()
+        self.assertEqual(
+            self.harness.charm.unit.status,
+            ops.BlockedStatus("Bitcoin Core RPC did not become ready"),
+        )
+
+    @patch("charm.bitcoin_metadata.collect_upload_metadata")
+    @patch("charm.utils")
     def test_upgrade_charm_is_metadata_only(self, mock_utils, collect_metadata):
         mock_utils.get_version.return_value = "v31.1.0"
         mock_utils.bitcoind_binary_installed.return_value = True

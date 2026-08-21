@@ -263,6 +263,9 @@ class BitcoinCharm(ops.CharmBase):
         ]
         msg = ", ".join(parts)
         if all(statuses):
+            if utils.wait_for_running_version(self.config) is None:
+                self.unit.status = ops.BlockedStatus("Bitcoin Core RPC did not become ready")
+                return
             metadata_error = bitcoin_metadata.collect_upload_metadata(self)
             if metadata_error:
                 self.unit.status = ops.BlockedStatus(metadata_error)
