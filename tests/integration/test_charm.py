@@ -234,6 +234,10 @@ def test_running_release_replacement_verifies_rpc_and_versions(juju: jubilant.Ju
     before_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
 
     juju.config(APP, {"version": UPDATED_VERSION, "binary-url": UPDATED_BINARY_URL})
+    completed = juju.run(UNIT, "print-event-log", wait=1800)
+    assert completed.status == "completed"
+    assert f"version={UPDATED_VERSION}" in completed.results["event-log"]
+    assert f"binary-url={UPDATED_BINARY_URL}" in completed.results["event-log"]
     _wait_active(juju)
 
     after_pid = juju.ssh(UNIT, "systemctl show bitcoind -p MainPID --value").strip()
