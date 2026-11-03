@@ -20,6 +20,12 @@ defaults:
 env:
   GOLANGCI_LINT_VERSION: v2.12.2
 
+concurrency:
+  # A newer push to the same PR cancels the stale run. Every other event gets its
+  # own group, so pushes to main are never cancelled or dropped while pending.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   golangci-lint:
     runs-on: blacksmith-2vcpu-ubuntu-2404
