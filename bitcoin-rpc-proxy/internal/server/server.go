@@ -14,7 +14,11 @@ import (
 const (
 	readTimeout       = 30 * time.Second
 	readHeaderTimeout = 5 * time.Second
-	idleTimeout       = 60 * time.Second
+	// idleTimeout must exceed the idle-connection timeout of every client that
+	// pools keep-alive connections to us. Iris pools backend connections for
+	// 90s (-outbound-idle-conn-timeout); at 60s here, Iris reused connections
+	// we had already closed and returned HTTP 500 (EOF) on ~1-2% of requests.
+	idleTimeout = 120 * time.Second
 )
 
 // Server wraps http.Server with deterministic startup and graceful shutdown.

@@ -17,7 +17,10 @@ vertical with no changes states `No changes this release.`
 
 ### Proxy
 
-- No changes this release.
+- Idle keep-alive timeout raised from 60s to 120s so it outlasts the Iris
+  gateway's 90s backend connection pool. Iris was reusing connections the
+  proxy had already closed and returning HTTP 500 (`EOF`) on roughly 1 to 2%
+  of requests, which held api-bitcoin-mainnet at ~97.5% on the status page.
 
 ## [0.4.0] - 2026-07-06
 
