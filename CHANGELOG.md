@@ -17,6 +17,16 @@ vertical with no changes states `No changes this release.`
 
 ### Proxy
 
+- No changes this release.
+
+## [0.4.1] - 2026-11-13
+
+### Charm
+
+- No changes this release.
+
+### Proxy
+
 - Idle keep-alive timeout raised from 60s to 120s so it outlasts the Iris
   gateway's 90s backend connection pool. Iris was reusing connections the
   proxy had already closed and returning HTTP 500 (`EOF`) on roughly 1 to 2%
@@ -107,7 +117,8 @@ vertical with no changes states `No changes this release.`
   allowlist, configurable listen address, and an admin endpoint exposing
   health and Prometheus metrics.
 
-[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/dwellir-public/bitcoin-rpc-operator/compare/v0.2.0...v0.2.1
